@@ -3,8 +3,6 @@ dist
 
 .DS_Store
 
-.eslintcache
-.eslintcache-pre-commit
 .type-coverage
 .history
 

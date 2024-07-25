@@ -1,0 +1,69 @@
+name: Merge And Publish
+
+on:
+  workflow_dispatch
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: |
+          rm -rf ./.npmrc
+          pnpm install --no-frozen-lockfile
+
+      # ========================================
+
+      - name: Upgrade version
+        id: upgrade_version
+        run: |
+          node ./scripts/upgrade-version.js
+          VERSION=$(node -p "require('./package.json').version")
+          echo "$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish @jshow/cli
+        run: |
+          pnpm build
+          npm publish --no-git-checks --access public
+
+      - name: Build commit message
+        id: commit_msg
+        run: |
+          COMMIT_MSG="chore: upgrade version\n"
+          if [ "${{ steps.upgrade_version.outputs.version }}" != "" ]; then
+            COMMIT_MSG="$COMMIT_MSG\n- @jshow/cli ${{ steps.upgrade_version.outputs.version }}"
+          fi
+          echo "message=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG"
+
+      - name: Commit and push version changes
+        if: steps.upgrade_version.outputs.version != ''
+        run: |
+          git config --local user.email "dev@jshow.org"
+          git config --local user.name "jShow"
+          git restore ./.npmrc
+          git add .
+          echo -e "${{ steps.commit_msg.outputs.message }}" | git commit -F -
+          git pull --rebase
+          git push "https://${{ github.actor }}:${{ secrets.GIT_TOKEN }}@github.com/${{ github.repository }}.git"

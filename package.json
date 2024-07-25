@@ -3,44 +3,74 @@
   "version": "1.0.0",
   "description": "A simple CLI tool for j-show",
   "license": "MIT",
+  "homepage": "https://github.com/j-show/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j-show/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/j-show/cli/issues"
+  },
   "keywords": [
     "cli",
     "jshow",
     "jshow-cli"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/j-show/cli.git"
+  "bin": {
+    "jshow": "./dist/cli.mjs"
   },
-  "homepage": "https://github.com/j-show/cli",
-  "bugs": {
-    "url": "https://github.com/j-show/cli/issues"
+  "files": [
+    "dist",
+    "README.md",
+    "README_CN.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "engines": {
+    "pnpm": ">=10"
   },
   "scripts": {
     "prepare": "husky install",
     "precommit": "lint-staged",
     "clean": "rm -rf ./dist && rm -rf ./out",
-    "build": "ts-node -P ./scripts/tsconfig.json -T ./scripts/build"
+    "start": "ts-node-esm ./src/cli.ts",
+    "build": "vite build",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.5",
-    "chalk": "^4.1.0",
-    "execa": "^4.0.2",
-    "fs-extra": "^11.2.0",
+    "@types/node": "^22",
+    "eslint": "^9",
+    "eslint-config-jshow": "^1.0.11",
+    "eslint-config-prettier": "latest",
+    "eslint-plugin-jshow": "^1.0.12",
+    "eslint-plugin-prettier": "latest",
     "husky": "latest",
     "lint-staged": "latest",
     "prettier": ">=3",
-    "ts-node": "^10.9.2",
-    "tslib": "^2.6.2",
-    "typescript": "^5.3.3"
+    "semver": "^7.7.3",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8",
+    "vite": "^7",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4"
   },
-  "peerDependencies": {
-    "eslint": "^8",
-    "typescript-eslint": "latest",
-    "eslint-config-jshow": "latest",
-    "eslint-plugin-jshow": "latest",
-    "eslint-config-prettier": "latest",
-    "eslint-plugin-prettier": "latest",
-    "eslint-plugin-simple-import-sort": "latest"
+  "ts-node": {
+    "esm": true,
+    "compilerOptions": {
+      "module": "NodeNext",
+      "moduleResolution": "NodeNext",
+      "esModuleInterop": true,
+      "allowJs": true
+    }
   }
 }
