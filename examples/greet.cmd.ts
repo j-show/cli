@@ -5,6 +5,9 @@
 
 import { BaseCommand, type CommandContext } from '@jshow/cli';
 
+/**
+ * 示例：`greet` 命令，演示字符串/布尔/数值类选项与自定义校验。
+ */
 export default class GreetCommand extends BaseCommand {
   static name = 'greet';
   static force = false;

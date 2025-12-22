@@ -5,46 +5,71 @@
 
 import { type Command } from 'commander';
 
+import { logger } from './logger';
+
+/** Commander 解析后的选项值：布尔开关、单值或多值 */
+export type CommandValueType = boolean | string | string[];
+
+export interface CommandArgument {
+  /**
+   * 参数名称
+   * @description 参数名称
+   * @example 'input'
+   */
+  name: string;
+  /**
+   * 参数描述
+   * @description 参数描述
+   * @example 'The input directory'
+   */
+  description?: string;
+  /**
+   * 参数默认值
+   * @description 当用户未提供该参数时使用的默认值
+   */
+  defaultValue?: CommandValueType;
+  /**
+   * 参数是否必填
+   * @description 参数是否必填
+   * @example true
+   */
+  required?: boolean;
+  /**
+   * 参数是否可变
+   * @description 如果为 true，用户可以提供多个值
+   * @default false
+   */
+  variadic?: boolean;
+}
+
 /**
  * 命令选项配置接口
  * @description 用于定义命令的选项参数
  */
-export interface CommandOption<T = unknown> {
-  /**
-   * 选项全称
-   * @description 格式如 '--name <value>' 或 '--flag'
-   * @example '--name <value>', '--verbose'
-   */
-  flag: string;
+export interface CommandOption extends CommandArgument {
   /**
    * 选项缩写
-   * @description 单字符缩写，如 '-n'
-   * @example '-n', '-v'
+   * @description 单字符缩写，如 'n'
+   * @example 'n', 'v'
    */
-  abbreviation?: string;
+  abbr?: string;
   /**
-   * 选项说明
-   * @description 在帮助信息中显示的选项描述
-   */
-  description?: string;
-  /**
-   * 选项默认值
-   * @description 当用户未提供该选项时使用的默认值
-   */
-  defaultValue?: T;
-  /**
-   * 是否必填
-   * @description 如果为 true，用户必须提供该选项
+   * 选项是否有值
+   * @description 如果为 true，选项没有值，否则选项有值
    * @default false
    */
-  required?: boolean;
+  flagValue?: boolean;
 }
+
+export type CommandOptionsType = Record<string, CommandValueType>;
 
 /**
  * 命令参数配置接口
  * @description 用于定义命令的基本信息和选项
  */
-export interface CommandArgs {
+export interface CommandArgs<
+  T extends CommandOptionsType = CommandOptionsType
+> {
   /**
    * 命令名称
    * @description 在命令行中使用的命令名称
@@ -80,24 +105,31 @@ export interface CommandArgs {
    */
   examples?: string[];
   /**
+   * 命令参数数组
+   * @description 该命令支持的所有参数
+   */
+  arguments?: CommandArgument[];
+  /**
    * 命令选项数组
    * @description 该命令支持的所有选项
    */
-  options: CommandOption[];
+  options?: CommandOption[];
   /**
    * 命令参数验证函数
    * @description 在执行前验证命令参数，返回错误信息或 null
    * @param options - 解析后的选项对象
    * @returns 验证错误信息，如果验证通过则返回 null
    */
-  validate?: (options: Record<string, unknown>) => string | null;
+  validate?: (options: T) => string | null;
 }
 
 /**
  * 命令执行上下文
  * @description 传递给生命周期钩子的上下文信息
  */
-export interface CommandContext {
+export interface CommandContext<
+  T extends CommandOptionsType = CommandOptionsType
+> {
   /**
    * 命令名称
    */
@@ -105,7 +137,7 @@ export interface CommandContext {
   /**
    * 解析后的选项
    */
-  options: Record<string, unknown>;
+  options: T;
   /**
    * 命令参数
    */
@@ -135,6 +167,32 @@ interface CommandPlugin {
    */
   afterExecute?(context: CommandContext): void;
 }
+
+/**
+ * 根据 `CommandArgument` 生成 Commander 的参数字符串（如 `<name>`、`[files...]`）。
+ * @param item - 位置参数定义
+ * @returns 传给 `program.argument()` 的占位符片段
+ * @internal
+ */
+const getArgumentFlag = (item: CommandArgument) => {
+  const tmp = item.required ? '<V>' : '[V]';
+  const dic = item.variadic ? '...' : '';
+
+  return tmp.replace('V', `${item.name}${dic}`);
+};
+
+/**
+ * 根据 `CommandOption` 生成长选项名；若为带值选项则拼接 `getArgumentFlag` 结果。
+ * @param item - 选项定义
+ * @returns 传给 `program.option()` 的 flags 片段（不含短选项 `-x`）
+ * @internal
+ */
+const getOptionFlag = (item: CommandOption) => {
+  const flags = [`--${item.name}`];
+  if (item.flagValue) flags.push(getArgumentFlag(item));
+
+  return flags.join(' ');
+};
 
 /**
  * 命令类类型定义
@@ -169,8 +227,9 @@ export type CommandImportType = { default: CommandClassType };
  *       group: 'build',
  *       options: [
  *         {
- *           flag: '--name <value>',
- *           abbreviation: '-n',
+ *           name: 'name',
+ *           abbr: 'n',
+ *           flagValue: true,
  *           description: '名称参数',
  *           required: true,
  *         },
@@ -182,22 +241,24 @@ export type CommandImportType = { default: CommandClassType };
  *     };
  *   }
  *
- *   protected beforeExecute(context: CommandContext): void {
+ *   protected async beforeExecute(context: CommandContext): Promise<void> {
  *     console.log('执行前准备...');
  *   }
  *
- *   public execute(): void {
- *     const options = this.command.opts();
+ *   public async execute(context: CommandContext): Promise<void> {
+ *     const { options } = context;
  *     console.log(`Hello, ${options.name || 'world'}!`);
  *   }
  *
- *   protected afterExecute(context: CommandContext): void {
+ *   protected async afterExecute(context: CommandContext): Promise<void> {
  *     console.log('执行完成');
  *   }
  * }
  * ```
  */
-export abstract class BaseCommand {
+export abstract class BaseCommand<
+  T extends CommandOptionsType = CommandOptionsType
+> {
   /**
    * 命令名称（静态属性）
    * @description 必须在子类中设置，用于命令注册
@@ -264,42 +325,37 @@ export abstract class BaseCommand {
    * @protected
    */
   protected init(program: Command): void {
-    const { description, aliases, options, examples } = this.args;
+    const args = this.args;
 
     // 设置命令描述
-    if (description) {
-      program.description(description);
+    if (args.description) {
+      program.description(args.description);
     }
 
     // 设置命令别名
-    if (aliases && aliases.length > 0) {
-      program.aliases(aliases);
+    if (args.aliases?.length) {
+      program.aliases(args.aliases);
+    }
+
+    // 设置命令参数
+    for (const { description, defaultValue, ...item } of args.arguments ?? []) {
+      program.argument(getArgumentFlag(item), description, defaultValue);
     }
 
     // 自动注册选项
-    for (const option of options) {
-      const flag = option.abbreviation
-        ? `${option.abbreviation}, ${option.flag}`
-        : option.flag;
+    for (const { abbr, description, defaultValue, ...item } of args.options ??
+      []) {
+      const flags = [getOptionFlag(item)];
+      if (abbr) flags.unshift(`-${abbr}`);
 
-      const defaultValue = option.defaultValue as
-        | string
-        | boolean
-        | string[]
-        | undefined;
-
-      if (option.required) {
-        program.requiredOption(flag, option.description || '', defaultValue);
-      } else {
-        program.option(flag, option.description || '', defaultValue);
-      }
+      program.option(flags.join(', '), description, defaultValue);
     }
 
     // 添加使用示例
-    if (examples && examples.length > 0) {
+    if (args.examples?.length) {
       program.addHelpText(
         'after',
-        '\n示例:\n' + examples.map(ex => `  ${ex}`).join('\n')
+        '\n示例:\n' + args.examples.map(ex => `  ${ex}`).join('\n')
       );
     }
   }
@@ -309,14 +365,14 @@ export abstract class BaseCommand {
    * @description 包装 execute() 方法，添加生命周期钩子和错误处理
    * @protected
    */
-  protected setupAction(): void {
-    this.command.action((...args: unknown[]) => {
-      const options = this.command.opts();
-      const commandArgs = args.slice(0, -1) as string[];
-      const context: CommandContext = {
+  protected async setupAction(): Promise<void> {
+    this.command.action(async (...inputs: unknown[]) => {
+      const options = this.command.opts() as T;
+      const args = inputs.slice(0, -1) as string[];
+      const context: CommandContext<T> = {
         name: this.name,
         options,
-        args: commandArgs,
+        args,
         startTime: Date.now()
       };
 
@@ -324,8 +380,12 @@ export abstract class BaseCommand {
         const plugins = this.getPlugins();
 
         // 执行前钩子
-        plugins.forEach(plugin => plugin.beforeExecute?.(context));
-        this.beforeExecute?.(context);
+        await Promise.all(
+          plugins
+            .map(plugin => plugin.beforeExecute?.(context))
+            .filter(v => v != null)
+        );
+        await this.beforeExecute?.(context);
 
         // 参数验证
         const validationError = this.validateOptions(options);
@@ -334,11 +394,15 @@ export abstract class BaseCommand {
         }
 
         // 执行命令
-        this.execute();
+        await this.execute(context);
 
         // 执行后钩子
-        this.afterExecute?.(context);
-        plugins.forEach(plugin => plugin.afterExecute?.(context));
+        await this.afterExecute?.(context);
+        await Promise.all(
+          plugins
+            .map(plugin => plugin.afterExecute?.(context))
+            .filter(v => v != null)
+        );
       } catch (error) {
         // 错误处理钩子
         const handled = this.onError(error as Error, context);
@@ -356,17 +420,17 @@ export abstract class BaseCommand {
    * @returns 验证错误信息，如果验证通过则返回 null
    * @protected
    */
-  protected validateOptions(options: Record<string, unknown>): string | null {
-    const { validate, options: optionDefs } = this.args;
+  protected validateOptions(options: T): string | null {
+    const { validate, options: optionDefs = [] } = this.args;
 
     // 检查必填选项
     for (const option of optionDefs) {
-      if (option.required) {
-        const optionName = this.extractOptionName(option.flag);
-        if (options[optionName] == null) {
-          return `选项 ${option.flag} 是必填的`;
-        }
-      }
+      if (!option.required) continue;
+
+      const flag = option.name;
+      if (options[flag] != null) continue;
+
+      return `选项 ${flag} 是必填的`;
     }
 
     // 执行自定义验证
@@ -378,17 +442,6 @@ export abstract class BaseCommand {
   }
 
   /**
-   * 从选项标志中提取选项名称
-   * @param flag - 选项标志，如 '--name <value>' 或 '--verbose'
-   * @returns 选项名称，如 'name' 或 'verbose'
-   * @protected
-   */
-  protected extractOptionName(flag: string): string {
-    // 移除 '--' 前缀和 '<value>' 等后缀
-    return flag.replace(/^--?/, '').split(/\s+/)[0].trim();
-  }
-
-  /**
    * 错误处理钩子
    * @description 子类可以重写此方法来自定义错误处理逻辑
    * @param error - 发生的错误
@@ -396,9 +449,9 @@ export abstract class BaseCommand {
    * @returns 如果错误已被处理返回 true，否则返回 false
    * @protected
    */
-  protected onError(error: Error, context: CommandContext): boolean {
+  protected onError(error: Error, context: CommandContext<T>): boolean {
     // 默认实现：输出错误信息
-    console.error(`❌ 执行命令 "${context.name}" 时出错:`, error.message);
+    logger.error(`❌ 执行命令 "${context.name}" 时出错:`, error.message);
     return false;
   }
 
@@ -408,14 +461,15 @@ export abstract class BaseCommand {
    * @param context - 命令执行上下文
    * @protected
    */
-  public beforeExecute?(context: CommandContext): void;
+  public beforeExecute?(context: CommandContext<T>): Promise<void>;
 
   /**
    * 执行命令
    * @description 子类必须实现此方法，包含命令的实际执行逻辑
+   * @param context - 命令执行上下文
    * @abstract
    */
-  public abstract execute(): void;
+  public abstract execute(context: CommandContext<T>): Promise<void>;
 
   /**
    * 执行后钩子
@@ -423,7 +477,7 @@ export abstract class BaseCommand {
    * @param context - 命令执行上下文
    * @protected
    */
-  public afterExecute?(context: CommandContext): void;
+  public afterExecute?(context: CommandContext<T>): Promise<void>;
 }
 
 /**

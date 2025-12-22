@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Vitest 配置
+ * @description Node 环境、测试目录与覆盖率输出策略。
+ */
+
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({

@@ -78,8 +78,9 @@ The CLI automatically scans and loads command files (`.cmd.ts` or `.cmd.js`) and
          plugins: ['logger', 'timer'], // Optional: specify plugins to use
          options: [
            {
-             flag: '--name <value>',
-             abbreviation: '-n',
+             name: 'name',
+             abbr: 'n',
+             flagValue: true,
              description: 'Name parameter',
              defaultValue: 'world',
              required: false,
@@ -104,9 +105,9 @@ The CLI automatically scans and loads command files (`.cmd.ts` or `.cmd.js`) and
        console.log(`Starting command: ${context.name}`);
      }
 
-     public execute(): void {
-       const options = this.command.opts();
-       console.log(`Hello, ${options.name || 'world'}!`);
+     public async execute(context: CommandContext): Promise<void> {
+       const { options } = context;
+       console.log(`Hello, ${String(options.name || 'world')}!`);
      }
 
      public afterExecute(context: CommandContext): void {
@@ -162,6 +163,17 @@ The `examples/` directory contains working examples:
 - `error-handler.plugin.ts` – An error handling plugin example (priority: 200)
 
 See [`examples/README.md`](./examples/README.md) for detailed usage instructions.
+
+---
+
+## Built-in Commands
+
+This package ships with a small set of built-in commands (enabled by default):
+
+- `release`: a monorepo release wizard (currently a placeholder for version bump & publish)
+- `backup`: backup workspace packages to an output directory (can optionally remove `.git`)
+
+You can find their implementations under `src/built-in/commands/`.
 
 ---
 
@@ -223,11 +235,13 @@ Command option configuration interface.
 
 #### Properties
 
-- `flag: string` - Option flag (e.g., `'--name <value>'` or `'--verbose'`)
-- `abbreviation?: string` - Option abbreviation (e.g., `'-n'`)
+- `name: string` - Option long name (used as `--${name}`), e.g. `'name'` or `'verbose'`
+- `abbr?: string` - Option short name (single char), e.g. `'n'` for `-n`
+- `flagValue?: boolean` - Whether this option expects a value (when `true`, CLI becomes `--name <value>`)
 - `description?: string` - Option description
 - `defaultValue?: T` - Default value for the option
 - `required?: boolean` - Whether the option is required (default: `false`)
+- `variadic?: boolean` - Whether this option accepts multiple values (becomes `--name <value...>`)
 
 ### BaseCommand
 
@@ -245,7 +259,7 @@ Command base class. All custom commands should extend this class.
 
 #### Abstract Methods
 
-##### `execute(): void`
+##### `execute(context: CommandContext): Promise<void>`
 
 Command execution logic. Subclasses must implement this method.
 
@@ -313,7 +327,7 @@ Lifecycle hook executed after command execution.
 2. **Default export**: Must use `export default` to export the command class
 3. **Extend base class**: Command class must extend `BaseCommand`
 4. **Static properties**: Must set `static name` property
-5. **Implement methods**: Must implement `execute()` method and `args` getter
+5. **Implement methods**: Must implement `execute(context)` method and `args` getter
 
 #### CommonJS Files
 
@@ -322,7 +336,7 @@ Lifecycle hook executed after command execution.
 3. **Export class**: Use `module.exports` to export class (Node.js automatically treats it as default export)
 4. **Extend base class**: Command class must extend `BaseCommand`
 5. **Static properties**: Must set `static name` property
-6. **Implement methods**: Must implement `execute()` method and `args` getter
+6. **Implement methods**: Must implement `execute(context)` method and `args` getter
 
 ### Plugin Files
 

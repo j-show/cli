@@ -5,6 +5,9 @@
 
 import { BaseCommand, type CommandContext } from '@jshow/cli';
 
+/**
+ * 示例：`build` 命令，演示分组、多选项、`validate` 与 `onError`。
+ */
 export default class BuildCommand extends BaseCommand {
   static name = 'build';
   static force = false;

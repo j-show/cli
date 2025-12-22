@@ -1,9 +1,13 @@
+/**
+ * @fileoverview `BasePlugin` 与 `isPlugin` 单元测试
+ */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CommandContext } from '../src/command';
 import { BasePlugin, isPlugin } from '../src/plugin';
 
-// 测试用的插件类
+/** 测试用：带生命周期钩子的插件 */
 class TestPlugin extends BasePlugin {
   static name = 'test-plugin';
   static force = false;
@@ -12,17 +16,17 @@ class TestPlugin extends BasePlugin {
     return 50;
   }
 
-  public beforeExecute(context: CommandContext): void {
+  public async beforeExecute(context: CommandContext) {
     console.log(`准备执行: ${context.name}`);
   }
 
-  public afterExecute(context: CommandContext): void {
+  public async afterExecute(context: CommandContext) {
     const duration = Date.now() - context.startTime;
     console.log(`执行完成，耗时: ${duration}ms`);
   }
 }
 
-// 测试用的简单插件类
+/** 测试用：仅默认优先级的最小插件 */
 class SimplePlugin extends BasePlugin {
   static name = 'simple-plugin';
   static force = false;
