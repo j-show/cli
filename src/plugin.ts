@@ -32,11 +32,11 @@ export type PluginImportType = { default: PluginClassType };
  *     return 50; // 优先级越高（数字越小）越先执行
  *   }
  *
- *   public beforeExecute(context: CommandContext): void {
+ *   public async beforeExecute(context: CommandContext): Promise<void> {
  *     console.log(`准备执行命令: ${context.name}`);
  *   }
  *
- *   public afterExecute(context: CommandContext): void {
+ *   public async afterExecute(context: CommandContext): Promise<void> {
  *     const duration = Date.now() - context.startTime;
  *     console.log(`命令执行完成，耗时: ${duration}ms`);
  *   }
@@ -83,12 +83,12 @@ export class BasePlugin {
    * @param context - 命令执行上下文
    * @example
    * ```typescript
-   * public beforeExecute(context: CommandContext): void {
+   * public async beforeExecute(context: CommandContext): Promise<void> {
    *   console.log(`开始执行: ${context.name}`);
    * }
    * ```
    */
-  public beforeExecute?(context: CommandContext): void;
+  public beforeExecute?(context: CommandContext): Promise<void>;
 
   /**
    * 命令执行后钩子
@@ -96,13 +96,13 @@ export class BasePlugin {
    * @param context - 命令执行上下文
    * @example
    * ```typescript
-   * public afterExecute(context: CommandContext): void {
+   * public async afterExecute(context: CommandContext): Promise<void> {
    *   const duration = Date.now() - context.startTime;
    *   console.log(`执行完成，耗时: ${duration}ms`);
    * }
    * ```
    */
-  public afterExecute?(context: CommandContext): void;
+  public afterExecute?(context: CommandContext): Promise<void>;
 }
 
 /**

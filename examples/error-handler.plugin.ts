@@ -6,9 +6,9 @@
 import { BasePlugin, type CommandContext } from '@jshow/cli';
 
 /**
- * 注意：插件本身没有错误处理钩子
- * 错误处理应该在命令的 onError 方法中实现
- * 这个插件主要用于演示插件的其他用途
+ * 示例：低优先级“错误处理”主题插件。
+ * 注意：BasePlugin 无专用 error 钩子；真实错误处理应在命令的 `onError` 中完成。
+ * 本类演示 before/after 中的诊断式日志。
  */
 export default class ErrorHandlerPlugin extends BasePlugin {
   static name = 'error-handler';

@@ -35,30 +35,32 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "prepare": "husky install",
-    "precommit": "lint-staged",
+    "prepare": "husky",
     "clean": "rm -rf ./dist && rm -rf ./out",
-    "start": "ts-node-esm ./src/cli.ts",
-    "build": "vite build",
-    "test": "vitest --run"
+    "build": "pnpm clean && vite build",
+    "test": "vitest --run",
+    "start": "ts-node-esm ./src/cli.ts"
   },
   "dependencies": {
-    "commander": "^12.1.0",
-    "ts-node": "^10.9.2",
-    "tslib": "^2.8.1"
+    "@jshow/logger": "latest",
+    "commander": "^14",
+    "inquirer": "^13",
+    "semver": "^7.7.3",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/semver": "^7.7.1",
     "eslint": "^9",
-    "eslint-config-jshow": "^1.0.11",
+    "eslint-config-jshow": "latest",
     "eslint-config-prettier": "latest",
-    "eslint-plugin-jshow": "^1.0.12",
+    "eslint-plugin-jshow": "latest",
     "eslint-plugin-prettier": "latest",
     "husky": "latest",
     "lint-staged": "latest",
     "prettier": ">=3",
-    "semver": "^7.7.3",
-    "typescript": "^5.3.3",
+    "tslib": "^2.8.1",
+    "typescript": "^5",
     "typescript-eslint": "^8",
     "vite": "^7",
     "vite-plugin-dts": "^4.5.4",

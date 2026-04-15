@@ -1,3 +1,7 @@
+/**
+ * @fileoverview `CommandProgram` 静态 API 单元测试
+ */
+
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -5,7 +9,7 @@ import { BaseCommand, type CommandArgs } from '../src/command';
 import { BasePlugin } from '../src/plugin';
 import { CommandProgram } from '../src/program';
 
-// 测试用的命令类
+/** 测试用命令 */
 class TestCommand extends BaseCommand {
   static name = 'test-command';
   static force = false;
@@ -19,12 +23,12 @@ class TestCommand extends BaseCommand {
     };
   }
 
-  public execute(): void {
+  public async execute() {
     console.log('执行测试命令');
   }
 }
 
-// 测试用的另一个命令类
+/** 测试用：第二个命令，用于链式 `use` */
 class AnotherCommand extends BaseCommand {
   static name = 'another-command';
   static force = false;
@@ -38,12 +42,12 @@ class AnotherCommand extends BaseCommand {
     };
   }
 
-  public execute(): void {
+  public async execute() {
     console.log('执行另一个命令');
   }
 }
 
-// 测试用的插件类
+/** 测试用插件 */
 class TestPlugin extends BasePlugin {
   static name = 'test-plugin';
   static force = false;
@@ -166,32 +170,28 @@ describe('CommandProgram', () => {
     it('应该设置版本号', () => {
       CommandProgram.use(TestCommand);
 
-      // 运行 run 方法以设置版本号
+      // `run()` 内部调用 `parseAsync` 且不 await；避免真实解析触发 `process.exit` 造成未处理的 Promise 拒绝
+      const parseSpy = vi
+        .spyOn(Command.prototype, 'parseAsync')
+        .mockImplementation(async () => {
+          return Promise.resolve(new Command());
+        });
+
       const originalArgv = process.argv;
-      const consoleErrorSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       process.argv = ['node', 'test', '--version'];
-      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('process.exit called');
-      });
 
       try {
         CommandProgram.run();
-      } catch {
-        // 忽略退出
+      } finally {
+        parseSpy.mockRestore();
+        process.argv = originalArgv;
       }
 
       const program = CommandProgram.program;
-      // 检查版本选项是否已设置
       const versionOption = program.options.find(
         opt => opt.long === '--version'
       );
       expect(versionOption).toBeDefined();
-
-      process.argv = originalArgv;
-      exitSpy.mockRestore();
-      consoleErrorSpy.mockRestore();
     });
   });
 });

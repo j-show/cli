@@ -9,6 +9,7 @@ import { version } from '../package.json';
 
 import { BUILT_IN_COMMANDS, BUILT_IN_PLUGINS } from './built-in';
 import { isCommand, type BaseCommand, type CommandClassType } from './command';
+import { logger } from './logger';
 import { isPlugin, type BasePlugin, type PluginClassType } from './plugin';
 
 /**
@@ -170,6 +171,11 @@ const enhanceHelp = (program: Command): void => {
   };
 };
 
+/**
+ * 将内置插件与内置命令注册到传入的 `CommandProgram` 上。
+ * @param program - 一般为 `CommandProgram` 类（静态方法挂载在同一对象上）
+ * @returns 可链式调用的程序类，便于 `initBuiltIn(CommandProgram).run()`
+ */
 export const initBuiltIn = (program: typeof CommandProgram) => {
   BUILT_IN_PLUGINS.forEach(plugin => {
     if (!isPlugin(plugin)) return;
@@ -359,9 +365,9 @@ export class CommandProgram {
 
     // 解析命令行参数并执行命令，添加错误处理
     try {
-      program.parse(process.argv);
+      program.parseAsync(process.argv);
     } catch (error) {
-      console.error(
+      logger.error(
         '❌ 执行失败:',
         error instanceof Error ? error.message : String(error)
       );

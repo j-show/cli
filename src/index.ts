@@ -1,6 +1,10 @@
 /* eslint-disable jshow/sort-export */
 
 /**
+ * @fileoverview 库入口：再导出 commander 与 jshow-cli 的命令/插件 API
+ */
+
+/**
  * 导出 commander 库的所有内容
  * @description 方便开发者直接使用 commander 的功能，无需额外安装
  */

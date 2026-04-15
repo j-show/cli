@@ -20,13 +20,13 @@
       }
     },
     {
-      "files": "*.{js,jsx}",
+      "files": "*.js",
       "options": {
         "parser": "babel"
       }
     },
     {
-      "files": "*.{ts,tsx}",
+      "files": "*.ts",
       "options": {
         "parser": "typescript"
       }

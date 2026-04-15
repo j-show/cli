@@ -1,3 +1,7 @@
+/**
+ * @fileoverview `BaseCommand` 与 `isCommand` 单元测试
+ */
+
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,8 +11,9 @@ import {
   type CommandContext,
   isCommand
 } from '../src/command';
+import { logger } from '../src/logger';
 
-// 测试用的命令类
+/** 测试用：带选项与校验的命令 */
 class TestCommand extends BaseCommand {
   static name = 'test';
   static force = false;
@@ -21,15 +26,17 @@ class TestCommand extends BaseCommand {
       group: 'test',
       options: [
         {
-          flag: '--name <value>',
-          abbreviation: '-n',
+          name: 'name',
+          abbr: 'n',
           description: '名称参数',
-          required: true
+          required: true,
+          flagValue: true
         },
         {
-          flag: '--verbose',
-          abbreviation: '-v',
-          description: '详细模式'
+          name: 'verbose',
+          abbr: 'v',
+          description: '详细模式',
+          flagValue: false
         }
       ],
       examples: ['jshow test --name hello'],
@@ -42,13 +49,13 @@ class TestCommand extends BaseCommand {
     };
   }
 
-  public execute(): void {
+  public async execute() {
     const options = this.command.opts();
     console.log(`执行测试命令: ${options.name || 'default'}`);
   }
 }
 
-// 测试用的简单命令类
+/** 测试用：无选项的最小命令 */
 class SimpleCommand extends BaseCommand {
   static name = 'simple';
   static force = false;
@@ -61,7 +68,7 @@ class SimpleCommand extends BaseCommand {
     };
   }
 
-  public execute(): void {
+  public async execute() {
     console.log('执行简单命令');
   }
 }
@@ -164,8 +171,9 @@ describe('BaseCommand', () => {
       };
 
       // 直接调用方法测试
-      if (cmd.beforeExecute) {
-        expect(() => cmd.beforeExecute!(context)).not.toThrow();
+      const beforeExecute = cmd.beforeExecute;
+      if (beforeExecute) {
+        expect(() => beforeExecute(context)).not.toThrow();
       } else {
         // 如果没有定义 beforeExecute，测试通过
         expect(true).toBe(true);
@@ -184,8 +192,9 @@ describe('BaseCommand', () => {
       };
 
       // 直接调用方法测试
-      if (cmd.afterExecute) {
-        expect(() => cmd.afterExecute!(context)).not.toThrow();
+      const afterExecute = cmd.afterExecute;
+      if (afterExecute) {
+        expect(() => afterExecute(context)).not.toThrow();
       } else {
         // 如果没有定义 afterExecute，测试通过
         expect(true).toBe(true);
@@ -195,8 +204,8 @@ describe('BaseCommand', () => {
 
   describe('错误处理', () => {
     it('应该处理错误', () => {
-      const consoleErrorSpy = vi
-        .spyOn(console, 'error')
+      const loggerErrorSpy = vi
+        .spyOn(logger, 'error')
         .mockImplementation(() => {});
       const simpleCmd = new Command('test');
       const cmd = new TestCommand(simpleCmd, []);
@@ -211,10 +220,10 @@ describe('BaseCommand', () => {
       const error = new Error('测试错误');
       const handled = cmd['onError'](error, context);
 
-      expect(consoleErrorSpy).toHaveBeenCalled();
+      expect(loggerErrorSpy).toHaveBeenCalled();
       expect(handled).toBe(false);
 
-      consoleErrorSpy.mockRestore();
+      loggerErrorSpy.mockRestore();
     });
   });
 });

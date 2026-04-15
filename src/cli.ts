@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { type CommandImportType, isCommand } from './command';
+import { logger } from './logger';
 import { isPlugin, type PluginImportType } from './plugin';
 import { CommandProgram, initBuiltIn } from './program';
 
@@ -67,6 +68,7 @@ const traversaDirectory = async (
 /**
  * 加载并注册插件
  * @param fn - 插件文件路径
+ * @param log - 用于输出加载警告的日志器（与主入口 fork 的命名空间一致）
  * @returns Promise<void>
  * @description
  * 动态导入插件文件，验证是否为有效的插件类，然后注册到 CommandProgram。
@@ -80,7 +82,7 @@ const traversaDirectory = async (
  * await loadPlugin('./plugins/my-plugin.plugin.js');
  * ```
  */
-const loadPlugin = async (fn: string): Promise<void> => {
+const loadPlugin = async (fn: string, log: typeof logger): Promise<void> => {
   try {
     // 将相对路径转换为绝对路径，确保 import() 能正确解析
     // Node.js 的 import() 可以处理绝对路径（包括 Windows 路径）
@@ -90,7 +92,7 @@ const loadPlugin = async (fn: string): Promise<void> => {
 
     const file = (await import(absolutePath)) as
       | PluginImportType
-      | { default?: unknown; [key: string]: unknown };
+      | { [key: string]: unknown; default?: unknown };
 
     // 处理 CommonJS 和 ESM 模块
     // CommonJS: module.exports = X (Node.js 会自动将其作为 default 导出)
@@ -105,13 +107,14 @@ const loadPlugin = async (fn: string): Promise<void> => {
     // 注册插件
     CommandProgram.install(plugin, plugin.force);
   } catch (error) {
-    console.warn(`加载插件文件 "${fn}" 时出错:`, error);
+    log.warn(`加载插件文件 "${fn}" 时出错:`, error);
   }
 };
 
 /**
  * 加载并注册命令
  * @param fn - 命令文件路径
+ * @param log - 用于输出加载错误的日志器
  * @returns Promise<void>
  * @description
  * 动态导入命令文件，验证是否为有效的命令类，然后注册到 CommandProgram。
@@ -124,7 +127,7 @@ const loadPlugin = async (fn: string): Promise<void> => {
  * await loadCommand('./commands/build.cmd.js');
  * ```
  */
-const loadCommand = async (fn: string): Promise<void> => {
+const loadCommand = async (fn: string, log: typeof logger): Promise<void> => {
   try {
     // 将相对路径转换为绝对路径，确保 import() 能正确解析
     // Node.js 的 import() 可以处理绝对路径（包括 Windows 路径）
@@ -134,7 +137,7 @@ const loadCommand = async (fn: string): Promise<void> => {
 
     const file = (await import(absolutePath)) as
       | CommandImportType
-      | { default?: unknown; [key: string]: unknown };
+      | { [key: string]: unknown; default?: unknown };
 
     // 处理 CommonJS 和 ESM 模块
     // CommonJS: module.exports = X (Node.js 会自动将其作为 default 导出)
@@ -150,7 +153,7 @@ const loadCommand = async (fn: string): Promise<void> => {
     // 注册命令
     CommandProgram.use(module, module.force);
   } catch (error) {
-    console.error(`加载命令文件 "${fn}" 时出错:`, error);
+    log.error(`加载命令文件 "${fn}" 时出错:`, error);
     throw error;
   }
 };
@@ -165,27 +168,38 @@ const loadCommand = async (fn: string): Promise<void> => {
  * 4. 运行 CLI 程序，解析命令行参数并执行相应命令
  */
 const runjShow = async (): Promise<void> => {
+  const log = logger.fork({ namespace: 'initialize' });
+
   const pluginPromises: Promise<void>[] = [];
   const commandPromises: Promise<void>[] = [];
 
+  log.debug(`cli version: ${CommandProgram.version}`);
+
   await traversaDirectory(process.cwd(), fn => {
     if (fn.endsWith('.plugin.ts') || fn.endsWith('.plugin.js')) {
-      pluginPromises.push(loadPlugin(fn));
+      pluginPromises.push(loadPlugin(fn, log));
       return;
     }
 
     if (fn.endsWith('.cmd.ts') || fn.endsWith('.cmd.js')) {
-      commandPromises.push(loadCommand(fn));
+      commandPromises.push(loadCommand(fn, log));
       return;
     }
   });
+
+  log.debug(
+    `found command: ${commandPromises.length}, plugin: ${pluginPromises.length}`
+  );
 
   // 等待所有插件和命令加载完成
   if (pluginPromises.length > 0 || commandPromises.length > 0) {
     await Promise.all([...pluginPromises, ...commandPromises]);
   }
 
-  initBuiltIn(CommandProgram).run();
+  const program = initBuiltIn(CommandProgram);
+  log.debug('init built-in done');
+
+  program.run();
 };
 
 // 启动 CLI
