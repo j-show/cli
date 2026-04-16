@@ -16,7 +16,7 @@ import {
   type CommandContext,
   type CommandOptionsType
 } from '../../command';
-import { logger } from '../../logger';
+import { logger as loggerCli } from '../../logger';
 import {
   addGit,
   commitGitByFile,
@@ -35,18 +35,22 @@ import {
   writeJsonSync
 } from '../../utils';
 
+const logger = loggerCli.fork({ namespace: 'release' });
+
 const RELEASE_TYPES: ReleaseType[] = ['major', 'minor', 'patch'];
 
 /**
- * 将任意输入转换为合法的 `ReleaseType`；不合法则回退为 `'patch'`。
+ * 将任意输入转换为合法的 `ReleaseType`；不合法则返回 `undefined`。
  * @param value - CLI 传入的字符串类型（如 `major` / `minor` / `patch`）
+ * @returns 合法的 release type
+ * @internal
  */
-const convertReleaseType = (value?: string): ReleaseType => {
+const convertReleaseType = (value?: string): ReleaseType | undefined => {
   if (
     typeof value !== 'string' ||
     !RELEASE_TYPES.includes(value as ReleaseType)
   ) {
-    return 'patch';
+    return void 0;
   }
 
   return value as ReleaseType;
@@ -67,9 +71,14 @@ const getPrereleaseIdentifier = (value: string): [string, ReleaseType[]] => {
   return [(version || void 0) as string, types];
 };
 
-/** 列出非 private 的包并由用户多选，返回选中的包列表 */
-const getReleasePackages = async (cwd: string) => {
-  const packages = getWorkspacePackages(cwd).filter(v => !v.manifest.private);
+/**
+ * 过滤非 private 的包并交由用户多选，返回选中的包列表。
+ * @param list - 扫描的包列表
+ * @returns 选中的包列表（可能为空数组）
+ * @internal
+ */
+const filterReleasePackages = async (list: PackageInfo[]) => {
+  const packages = list.filter(v => !v.manifest.private);
   if (packages.length < 1) return [];
 
   const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
@@ -92,7 +101,7 @@ const getReleasePackages = async (cwd: string) => {
 const askForNextVersion = async (
   packageName: string,
   currVersion: string,
-  releaseType: ReleaseType = 'patch'
+  releaseType?: ReleaseType
 ) => {
   const [preReleaseIdentifier, releaseTypes] =
     getPrereleaseIdentifier(currVersion);
@@ -106,7 +115,7 @@ const askForNextVersion = async (
 
   nextVersion = (
     await inquirer.prompt<{ version: string }>({
-      type: 'list',
+      type: 'rawlist',
       name: 'version',
       message: `Select release type for ${packageName}`,
       choices: releaseTypes
@@ -121,7 +130,12 @@ const askForNextVersion = async (
         .concat({
           name: 'custom',
           value: 'custom'
-        })
+        }),
+      default: semver.inc(
+        currVersion,
+        preReleaseIdentifier ? 'prepatch' : 'patch',
+        preReleaseIdentifier
+      )
     })
   ).version;
 
@@ -146,9 +160,14 @@ const askForNextVersion = async (
     return null;
   }
 
+  logger.empty();
+
   return nextVersion;
 };
 
+/**
+ * 单个包的版本变更信息。
+ */
 interface VersionInfo {
   dir: string;
   old: string;
@@ -158,6 +177,9 @@ interface VersionInfo {
 /**
  * 计算每个包的新版本号（当前返回空对象，占位）。
  * @param packages - 待发布的包列表
+ * @param releaseType - 预选 release type
+ * @returns 包名到版本信息映射；用户取消时返回 `null`
+ * @internal
  */
 const getNewVersions = async (
   packages: PackageInfo[],
@@ -182,7 +204,14 @@ const getNewVersions = async (
   return versions;
 };
 
-const execUpdateVersionPost = (json: PackageJson, dir: string) => {
+/**
+ * 若包内存在 `scripts.updateVersion:post`，则执行该脚本做自定义收尾。
+ * @param json - 包 manifest
+ * @param dir - 包目录或 package.json 路径
+ * @returns void
+ * @internal
+ */
+const execUpdateVersionPost = (json: PackageJson, dir: string): void => {
   const postScript = json.scripts?.['updateVersion:post'];
   if (!postScript) return;
 
@@ -199,12 +228,17 @@ const execUpdateVersionPost = (json: PackageJson, dir: string) => {
 /**
  * 将 `versions` 写入各包 `package.json`，并同步更新依赖版本引用。
  * @param versions - 包名到版本信息映射
+ * @returns Promise<void>
+ * @internal
  */
 const updateVersions = async (versions: Record<string, VersionInfo>) => {
   await Promise.all(
     Object.values(versions).map(async pkg => {
-      const dir = pkg.dir;
-      const json = readJsonSync<PackageJson>(dir);
+      const fn = path.join(pkg.dir, 'package.json');
+
+      const json = readJsonSync<PackageJson>(fn);
+      if (!json) return;
+
       json.version = pkg.new;
 
       for (const type of PACKAGE_DEPENDENCY_KEYS) {
@@ -220,20 +254,23 @@ const updateVersions = async (versions: Record<string, VersionInfo>) => {
         }
       }
 
-      writeJsonSync(dir, json);
+      writeJsonSync(fn, json);
 
-      execUpdateVersionPost(json, dir);
+      execUpdateVersionPost(json, pkg.dir);
     })
   );
 };
 
 /**
- * 按计算出的版本执行发布（当前为空实现）。
+ * Monorepo 按计算出的版本执行发布。
+ * @param cwd - 包根目录
  * @param versions - 包名到新版本的映射
  * @param force - 是否强制发布
  * @param push - 是否推送
+ * @returns Promise<void>
+ * @internal
  */
-const releasePackages = async (
+const releaseMonrepoPackages = async (
   cwd: string,
   versions: Record<string, VersionInfo>,
   force: boolean,
@@ -247,18 +284,21 @@ const releasePackages = async (
         message: [
           'Confirm:',
           ...Object.entries(versions).map(
-            ([name, version]) => `${name}: ${version.old} => ${version.new}`
+            ([name, ver]) => `${name}: ${ver.old} => ${ver.new}`
           ),
           ''
         ].join('\n')
       })
     ).value;
     if (!yes) return;
+
+    logger.empty();
   }
 
   logger.step('Update version...');
   await updateVersions(versions);
 
+  logger.step('Install dependencies...');
   installPnpm(cwd);
 
   if (getUnCommittedFiles(cwd).length < 1) {
@@ -266,24 +306,86 @@ const releasePackages = async (
     return;
   }
 
-  logger.step('Committing changes...');
+  logger.step('Committing...');
   addGit(cwd);
 
   const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
   writeFileSync(
     commitMsgFile,
-    'chore: release package',
+    'chore: release packages',
     '',
-    Object.entries(versions).map(
-      ([name, version]) => `- ${name} ${version.new}`
-    )
+    Object.entries(versions).map(([name, ver]) => `- ${name} ${ver.new}`)
   );
 
   commitGitByFile(commitMsgFile, cwd);
 
   if (push) {
-    logger.step('Pushing changes...');
+    logger.step('Pushing...');
     pushGit(cwd);
+  }
+};
+
+const releaseMultiPackages = async (
+  data: Record<string, VersionInfo>,
+  force: boolean,
+  push: boolean
+) => {
+  const versions: Record<string, VersionInfo> = {};
+
+  if (force) {
+    for (const key of Object.keys(data)) {
+      versions[key] = data[key];
+    }
+  } else {
+    const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
+      type: 'checkbox',
+      name: 'selecteds',
+      message: 'Select the package to release',
+      choices: Object.entries(data).map(([name, ver]) => ({
+        name: `${name}: ${ver.old} => ${ver.new}`,
+        value: name
+      })),
+      default: Object.keys(data)
+    });
+
+    if (selecteds.length < 1) return;
+
+    for (const key of selecteds) {
+      versions[key] = data[key];
+    }
+
+    logger.empty();
+  }
+
+  logger.step('Update version...');
+  await updateVersions(versions);
+
+  logger.empty();
+  for (const [name, ver] of Object.entries(versions)) {
+    await logger.scope({ namespace: name }, async log => {
+      const cwd = ver.dir;
+
+      log.step('Install dependencies...');
+      installPnpm(cwd);
+
+      if (getUnCommittedFiles(cwd).length < 1) {
+        log.error('No uncommitted changes');
+        return;
+      }
+
+      log.step('Committing...');
+      addGit(cwd);
+
+      const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
+      writeFileSync(commitMsgFile, `chore: release package ${ver.new}`);
+
+      commitGitByFile(commitMsgFile, cwd);
+
+      if (push) {
+        log.step('Pushing...');
+        pushGit(cwd);
+      }
+    });
   }
 };
 
@@ -297,6 +399,13 @@ interface ReleaseOptions extends CommandOptionsType {
 
 /**
  * Monorepo 发包向导：可选检查 git 状态、选择包、占位 bump 与发布。
+ * @example
+ * ```ts
+ * // 运行示例：
+ * // jshow release
+ * // jshow release --force
+ * // jshow release ./packages --check
+ * ```
  */
 export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
   static name = 'release';
@@ -328,8 +437,7 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
         {
           name: 'type',
           abbr: 't',
-          description: 'Release type mode',
-          defaultValue: 'patch'
+          description: 'Release type mode'
         },
         {
           name: 'force',
@@ -349,10 +457,17 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
 
   public async execute({
     args,
-    options: { check = true, type = 'patch', force = false, push = true }
+    options: { check = true, type, force = false, push = true }
   }: CommandContext<ReleaseOptions>): Promise<void> {
-    const [inputRoot = '.'] = args;
-    logger.info('Release start', { inputRoot });
+    let [inputRoot = '.'] = args;
+
+    inputRoot = path.resolve(inputRoot);
+
+    logger.info('Start', {
+      cwd: process.cwd(),
+      input: path.relative(process.cwd(), inputRoot)
+    });
+    logger.empty();
 
     if (check) {
       const files = getUnCommittedFiles(inputRoot);
@@ -364,21 +479,32 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
       }
     }
 
-    const packages = await getReleasePackages(inputRoot);
-    if (packages.length === 0) {
+    const packages = getWorkspacePackages(inputRoot);
+    const corePkg = packages.find(o => !!o.manifest.private);
+
+    const selected = await filterReleasePackages(packages);
+    if (selected.length === 0) {
       logger.warn('No packages to release');
       process.exit(1);
     }
 
+    logger.empty();
     logger.label('Will bump:');
-    logger.label(packages.map(o => `    ${o.name}`).join('\n'));
-    logger.label();
+    logger.label(
+      selected.map(o => `    ${o.name} ${o.manifest.version}`).join('\n')
+    );
+    logger.empty();
 
-    const versions = await getNewVersions(packages, convertReleaseType(type));
+    const versions = await getNewVersions(selected, convertReleaseType(type));
     if (!versions) process.exit(1);
 
-    await releasePackages(inputRoot, versions, !!force, !!push);
+    if (corePkg) {
+      await releaseMonrepoPackages(corePkg.dir, versions, !!force, !!push);
+    } else {
+      await releaseMultiPackages(versions, !!force, !!push);
+    }
 
-    logger.info('Release completed');
+    logger.empty();
+    logger.info('Completed');
   }
 }

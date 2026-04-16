@@ -13,25 +13,31 @@ export default class TimerPlugin extends BasePlugin {
   static force = false;
 
   /**
-   * 设置插件优先级
-   * 优先级低于 logger 插件，所以会在 logger 之后执行
+   * 设置插件优先级。
+   * @returns 优先级（低于 logger，因此通常后执行）
    */
   public get priority(): number {
     return 100;
   }
 
   /**
-   * 命令执行前钩子
+   * 命令执行前钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
+   * @description
+   * 这里故意留空：计时只依赖 `context.startTime`，由框架统一设置，
+   * 插件无需重复记录，避免不同插件间出现“起点不一致”的误差。
    */
-  public beforeExecute(context: CommandContext): void {
-    // 可以在这里记录开始时间
-    // 注意：context.startTime 已经在 CommandProgram 中设置
+  public async beforeExecute(context: CommandContext) {
+    //
   }
 
   /**
-   * 命令执行后钩子
+   * 命令执行后钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
    */
-  public afterExecute(context: CommandContext): void {
+  public async afterExecute(context: CommandContext) {
     const duration = Date.now() - context.startTime;
     const seconds = (duration / 1000).toFixed(2);
 

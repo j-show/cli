@@ -3,7 +3,7 @@
   "tabWidth": 2,
   "singleQuote": true,
   "bracketSpacing": true,
-  "endOfLine": "auto",
+  "endOfLine": "crlf",
   "trailingComma": "none",
   "arrowParens": "avoid",
   "overrides": [

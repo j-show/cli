@@ -14,16 +14,30 @@ export default class ErrorHandlerPlugin extends BasePlugin {
   static name = 'error-handler';
   static force = false;
 
+  /**
+   * 设置插件优先级。
+   * @returns 优先级（低优先级，最后执行）
+   */
   public get priority(): number {
     // 低优先级，最后执行
     return 200;
   }
 
+  /**
+   * 命令执行前钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
+   */
   public beforeExecute(context: CommandContext): void {
     // 可以在这里设置错误处理环境
     console.log(`[ErrorHandler] 准备执行命令: ${context.name}`);
   }
 
+  /**
+   * 命令执行后钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
+   */
   public afterExecute(context: CommandContext): void {
     const duration = Date.now() - context.startTime;
     if (duration > 5000) {

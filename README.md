@@ -63,7 +63,7 @@ The CLI automatically scans and loads command files (`.cmd.ts` or `.cmd.js`) and
 
    ```typescript
    // example.cmd.ts
-   import { BaseCommand, CommandContext } from '@jshow/cli';
+   import { BaseCommand, type CommandContext } from '@jshow/cli';
 
    export default class ExampleCommand extends BaseCommand {
      static name = 'example';
@@ -101,7 +101,7 @@ The CLI automatically scans and loads command files (`.cmd.ts` or `.cmd.js`) and
        };
      }
 
-     public beforeExecute(context: CommandContext): void {
+     public async beforeExecute(context: CommandContext): Promise<void> {
        console.log(`Starting command: ${context.name}`);
      }
 
@@ -110,7 +110,7 @@ The CLI automatically scans and loads command files (`.cmd.ts` or `.cmd.js`) and
        console.log(`Hello, ${String(options.name || 'world')}!`);
      }
 
-     public afterExecute(context: CommandContext): void {
+     public async afterExecute(context: CommandContext): Promise<void> {
        console.log(`Command completed in ${Date.now() - context.startTime}ms`);
      }
    }
@@ -279,11 +279,11 @@ The `CommandArgs` interface includes:
 - `examples?: string[]` - Usage examples
 - `validate?: (options: Record<string, unknown>) => string | null` - Optional validation function
 
-##### `beforeExecute?(context: CommandContext): void`
+##### `beforeExecute?(context: CommandContext): Promise<void>`
 
 Lifecycle hook executed before command execution.
 
-##### `afterExecute?(context: CommandContext): void`
+##### `afterExecute?(context: CommandContext): Promise<void>`
 
 Lifecycle hook executed after command execution.
 
@@ -307,11 +307,11 @@ Plugin base class. All custom plugins should extend this class.
 
 #### Methods
 
-##### `beforeExecute?(context: CommandContext): void`
+##### `beforeExecute?(context: CommandContext): Promise<void>`
 
 Lifecycle hook executed before command execution.
 
-##### `afterExecute?(context: CommandContext): void`
+##### `afterExecute?(context: CommandContext): Promise<void>`
 
 Lifecycle hook executed after command execution.
 

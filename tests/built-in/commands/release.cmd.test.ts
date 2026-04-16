@@ -1,4 +1,3 @@
-/* eslint-disable no-void */
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 /**
  * @fileoverview 内置命令 `release` 单元测试
@@ -14,6 +13,16 @@ import { ReleaseCommand } from '../../../src/built-in/commands/release.cmd';
 import { logger } from '../../../src/logger';
 import type { PackageJson } from '../../../src/utils';
 import * as utils from '../../../src/utils';
+
+vi.mock('../../../src/logger', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/logger')>();
+  return {
+    ...actual,
+    logger: Object.assign(actual.logger, {
+      fork: vi.fn(() => actual.logger)
+    })
+  };
+});
 
 vi.mock('inquirer', () => ({
   default: {
@@ -113,9 +122,7 @@ describe('ReleaseCommand', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("isn't clean")
     );
-    expect(infoSpy.mock.calls.some(c => c[0] === 'Release completed')).toBe(
-      false
-    );
+    expect(infoSpy.mock.calls.some(c => c[0] === 'Completed')).toBe(false);
 
     errorSpy.mockRestore();
     infoSpy.mockRestore();
@@ -142,9 +149,7 @@ describe('ReleaseCommand', () => {
 
     // 实现里走 warn + exit
     expect(errorSpy).not.toHaveBeenCalledWith('No packages to release');
-    expect(infoSpy.mock.calls.some(c => c[0] === 'Release completed')).toBe(
-      false
-    );
+    expect(infoSpy.mock.calls.some(c => c[0] === 'Completed')).toBe(false);
 
     errorSpy.mockRestore();
     infoSpy.mockRestore();
@@ -193,9 +198,7 @@ describe('ReleaseCommand', () => {
     });
 
     expect(utils.writeJsonSync).toHaveBeenCalled();
-    expect(infoSpy.mock.calls.some(c => c[0] === 'Release completed')).toBe(
-      true
-    );
+    expect(infoSpy.mock.calls.some(c => c[0] === 'Completed')).toBe(true);
 
     infoSpy.mockRestore();
   });
@@ -208,18 +211,19 @@ describe('ReleaseCommand', () => {
     });
     vi.mocked(utils.getWorkspacePackages).mockReturnValue([
       {
-        dir: '/repo/packages/a/package.json',
+        dir: '/repo/packages/a',
         name: 'pkg-a',
         manifest: { name: 'pkg-a', private: false, version: '1.0.0' }
       },
       {
-        dir: '/repo/packages/b/package.json',
+        dir: '/repo/packages/b',
         name: 'pkg-b',
         manifest: { name: 'pkg-b', private: false, version: '1.0.0' }
       }
     ]);
     vi.mocked(utils.readJsonSync).mockImplementation((p: unknown) => {
-      if (String(p).includes('/a/')) {
+      const v = String(p).replace(/\\/g, '/');
+      if (v.includes('/a/')) {
         return {
           name: 'pkg-a',
           version: '1.0.0',
@@ -242,7 +246,9 @@ describe('ReleaseCommand', () => {
 
     const calls = vi.mocked(utils.writeJsonSync).mock.calls;
     // pkg-b 版本 bump 到 1.0.1，因此 pkg-a 的依赖也应被替换为 1.0.1（不带 ^）
-    const pkgAWrite = calls.find(c => /[\\/]a[\\/]/.test(String(c[0])));
+    const pkgAWrite = calls.find(c =>
+      /[\\/]packages[\\/]a[\\/]package\.json$/.test(String(c[0]))
+    );
     const pkgAJson = (pkgAWrite?.[1] ?? {}) as PackageJson;
     expect(pkgAJson.dependencies?.['pkg-b']).toBe('1.0.1');
     expect(pkgAJson.dependencies?.['pkg-c']).toBe('workspace:^');

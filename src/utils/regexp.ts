@@ -12,6 +12,14 @@ const VALID_REGEXP_FLAGS = /^[gimsuy]*$/;
  *
  * @param source - 正则字面量字符串，或正则源码
  * @param defaultFlags - 非字面量形式时使用的标志位（字面量形式时忽略）
+ * @returns 转换后的 {@link RegExp}
+ * @example
+ * ```ts
+ * import { toRegExp } from '@jshow/cli';
+ *
+ * toRegExp('/\\.test\\./i').test('a.TEST.ts'); // true
+ * toRegExp('^foo$', 'i').test('FOO'); // true
+ * ```
  */
 export const toRegExp = (source: string, defaultFlags = ''): RegExp => {
   const s = source.trim();

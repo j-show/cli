@@ -1,4 +1,3 @@
-#!/usr/bin/env ts-node-esm
 /**
  * @fileoverview CLI 入口文件
  * @description 自动扫描并加载项目中的命令文件，然后运行 CLI 程序
@@ -6,11 +5,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { type CommandImportType, isCommand } from './command';
 import { logger } from './logger';
 import { isPlugin, type PluginImportType } from './plugin';
 import { CommandProgram, initBuiltIn } from './program';
+import { isIgnoreDir } from './utils';
 
 /**
  * 从文件路径中提取命令名称
@@ -23,6 +24,44 @@ import { CommandProgram, initBuiltIn } from './program';
  */
 const getName = (fn: string, key: 'cmd' | 'plugin'): string =>
   path.basename(fn, path.extname(fn)).replace(`.${key}`, '');
+
+/**
+ * 判断当前进程是否处于 ts-node 运行时。
+ *
+ * @returns 是否允许加载 `.ts` 命令/插件文件
+ * @internal
+ * @description
+ * 之所以需要该判断，是为了避免在“仅运行已构建产物（dist）”的场景里误加载源码 `.ts` 文件，
+ * 进而导致 Node 直接执行 TypeScript 失败。
+ */
+const isTsNodeRuntime = (): boolean =>
+  process.execArgv.some(arg => arg.includes('ts-node')) ||
+  Boolean(process.env.TS_NODE_PROJECT) ||
+  Boolean(process.env.TS_NODE_COMPILER_OPTIONS);
+
+/**
+ * 当前 CLI 入口文件所在目录（如 `src/`、`dist/`）。
+ * 使用 `process.argv[1]`，避免在同时产出 CJS/ESM 的入口里使用 `import.meta`（TS1470）。
+ */
+function getCliModuleDir(): string {
+  const main = process.argv[1];
+  if (main == null || main === '') {
+    return process.cwd();
+  }
+  return path.dirname(path.resolve(main));
+}
+
+const BUILT_IN_COMMAND_PATH = path.normalize(
+  path.resolve(getCliModuleDir(), 'built-in', 'commands')
+);
+
+const isBuiltInCommandPath = (fn: string): boolean => {
+  const abs = path.normalize(path.resolve(fn));
+  return (
+    abs === BUILT_IN_COMMAND_PATH ||
+    abs.startsWith(BUILT_IN_COMMAND_PATH + path.sep)
+  );
+};
 
 /**
  * 递归遍历目录
@@ -45,12 +84,15 @@ const traversaDirectory = async (
   callback: (fn: string) => void,
   ignore: string[] = []
 ): Promise<void> => {
+  const allowTs = isTsNodeRuntime();
   const list = fs.readdirSync(root);
 
   for (const item of list) {
-    if (ignore.includes(item)) continue;
+    if (isIgnoreDir(item) || ignore.includes(item)) continue;
 
     const fn = path.join(root, item);
+    if (isBuiltInCommandPath(fn)) continue;
+
     const stat = fs.statSync(fn);
 
     if (stat.isDirectory()) {
@@ -60,6 +102,7 @@ const traversaDirectory = async (
 
     if (!stat.isFile()) continue;
     if (!fn.endsWith('.ts') && !fn.endsWith('.js')) continue;
+    if (fn.endsWith('.ts') && !allowTs) continue;
 
     await callback(fn);
   }
@@ -90,7 +133,8 @@ const loadPlugin = async (fn: string, log: typeof logger): Promise<void> => {
       ? fn
       : path.resolve(process.cwd(), fn);
 
-    const file = (await import(absolutePath)) as
+    const fileUrl = pathToFileURL(absolutePath).href;
+    const file = (await import(fileUrl)) as
       | PluginImportType
       | { [key: string]: unknown; default?: unknown };
 
@@ -135,7 +179,8 @@ const loadCommand = async (fn: string, log: typeof logger): Promise<void> => {
       ? fn
       : path.resolve(process.cwd(), fn);
 
-    const file = (await import(absolutePath)) as
+    const fileUrl = pathToFileURL(absolutePath).href;
+    const file = (await import(fileUrl)) as
       | CommandImportType
       | { [key: string]: unknown; default?: unknown };
 
@@ -166,8 +211,14 @@ const loadCommand = async (fn: string, log: typeof logger): Promise<void> => {
  * 2. 安装所有已启用的插件
  * 3. 从当前工作目录加载所有命令
  * 4. 运行 CLI 程序，解析命令行参数并执行相应命令
+ * @example
+ * ```ts
+ * import { runjShow } from '@jshow/cli';
+ *
+ * await runjShow();
+ * ```
  */
-const runjShow = async (): Promise<void> => {
+export const runjShow = async (): Promise<void> => {
   const log = logger.fork({ namespace: 'initialize' });
 
   const pluginPromises: Promise<void>[] = [];
@@ -199,8 +250,14 @@ const runjShow = async (): Promise<void> => {
   const program = initBuiltIn(CommandProgram);
   log.debug('init built-in done');
 
-  program.run();
+  await program.run();
 };
 
-// 启动 CLI
-runjShow();
+void runjShow().catch((err: unknown) => {
+  logger.error(
+    '❌ 启动失败:',
+    err instanceof Error ? err.message : String(err)
+  );
+
+  process.exit(1);
+});

@@ -141,7 +141,7 @@ describe('CommandProgram', () => {
   });
 
   describe('run', () => {
-    it('应该能够运行程序', () => {
+    it('应该能够运行程序', async () => {
       CommandProgram.use(TestCommand);
 
       // 模拟 process.argv
@@ -157,7 +157,7 @@ describe('CommandProgram', () => {
       });
 
       try {
-        CommandProgram.run();
+        await CommandProgram.run();
       } catch {
         // 忽略解析错误，因为我们只是测试 run 方法是否被调用
       }
@@ -167,10 +167,10 @@ describe('CommandProgram', () => {
       exitSpy.mockRestore();
     });
 
-    it('应该设置版本号', () => {
+    it('应该设置版本号', async () => {
       CommandProgram.use(TestCommand);
 
-      // `run()` 内部调用 `parseAsync` 且不 await；避免真实解析触发 `process.exit` 造成未处理的 Promise 拒绝
+      // 使用 mock 的 `parseAsync`，避免真实解析触发 `process.exit` 造成未处理的 Promise 拒绝
       const parseSpy = vi
         .spyOn(Command.prototype, 'parseAsync')
         .mockImplementation(async () => {
@@ -181,7 +181,7 @@ describe('CommandProgram', () => {
       process.argv = ['node', 'test', '--version'];
 
       try {
-        CommandProgram.run();
+        await CommandProgram.run();
       } finally {
         parseSpy.mockRestore();
         process.argv = originalArgv;

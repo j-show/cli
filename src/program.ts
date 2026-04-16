@@ -9,8 +9,10 @@ import { version } from '../package.json';
 
 import { BUILT_IN_COMMANDS, BUILT_IN_PLUGINS } from './built-in';
 import { isCommand, type BaseCommand, type CommandClassType } from './command';
-import { logger } from './logger';
 import { isPlugin, type BasePlugin, type PluginClassType } from './plugin';
+
+/** 顶层命令名，用于 Commander `Usage:` 行（与 `package.json` 中 bin `jshow` 一致） */
+const CLI_PROGRAM_NAME = 'jshow';
 
 /**
  * 插件类型接口
@@ -59,6 +61,8 @@ interface CommandType {
   group?: string;
 }
 
+const buildProgram = (): Command => new Command(CLI_PROGRAM_NAME);
+
 /**
  * 程序状态对象
  * @description 存储所有已注册的命令和 Commander 程序实例
@@ -74,7 +78,7 @@ const programShape = {
    * Commander 程序实例
    * @description 全局唯一的程序实例
    */
-  program: new Command()
+  program: buildProgram()
 };
 
 const DEFAULT_GROUP = 'default';
@@ -145,7 +149,7 @@ const enhanceHelp = (program: Command): void => {
     const grouped = groupCommands(programShape.commands);
 
     if (grouped.size > 0) {
-      help += '\n\n命令分组:\n';
+      help += '\n\nCommand Groups:';
       const sortedGroups = Array.from(grouped.entries()).sort((a, b) => {
         // DEFAULT_GROUP 组放在最后
         if (a[0] === DEFAULT_GROUP) return 1;
@@ -157,9 +161,9 @@ const enhanceHelp = (program: Command): void => {
         help += `\n  ${group}:\n`;
         for (const cmd of commands) {
           const instanceArgs = cmd.instance?.args;
-          const description = instanceArgs?.description || '无描述';
+          const description = instanceArgs?.description || 'No description';
           const aliases = instanceArgs?.aliases?.length
-            ? ` (别名: ${instanceArgs?.aliases.join(', ')})`
+            ? ` (Aliases: ${instanceArgs?.aliases.join(', ')})`
             : '';
 
           help += `    ${cmd.name.padEnd(20)} ${description}${aliases}\n`;
@@ -175,8 +179,16 @@ const enhanceHelp = (program: Command): void => {
  * 将内置插件与内置命令注册到传入的 `CommandProgram` 上。
  * @param program - 一般为 `CommandProgram` 类（静态方法挂载在同一对象上）
  * @returns 可链式调用的程序类，便于 `initBuiltIn(CommandProgram).run()`
+ * @example
+ * ```ts
+ * import { CommandProgram, initBuiltIn } from '@jshow/cli';
+ *
+ * initBuiltIn(CommandProgram).run();
+ * ```
  */
-export const initBuiltIn = (program: typeof CommandProgram) => {
+export const initBuiltIn = (
+  program: typeof CommandProgram
+): typeof CommandProgram => {
   BUILT_IN_PLUGINS.forEach(plugin => {
     if (!isPlugin(plugin)) return;
     program.install(plugin, plugin.force);
@@ -321,12 +333,12 @@ export class CommandProgram {
    */
   static reset(autoRun?: boolean): void {
     // 重新创建 program 实例以清除所有命令
-    programShape.program = new Command();
+    programShape.program = buildProgram();
 
     programShape.plugins = [];
     programShape.commands.clear();
 
-    if (autoRun) initBuiltIn(this).run();
+    if (autoRun) void initBuiltIn(this).run();
   }
 
   /**
@@ -343,11 +355,11 @@ export class CommandProgram {
    * CommandProgram.run();
    * ```
    */
-  static run(): void {
+  static async run(): Promise<void> {
     const program = programShape.program;
 
     // 设置版本号
-    program.version(this.version, '-v, --version', '显示版本号');
+    program.version(this.version, '-v, --version', 'program version');
 
     const plugins = programShape.plugins
       .map(p => p.instance)
@@ -364,14 +376,6 @@ export class CommandProgram {
     enhanceHelp(program);
 
     // 解析命令行参数并执行命令，添加错误处理
-    try {
-      program.parseAsync(process.argv);
-    } catch (error) {
-      logger.error(
-        '❌ 执行失败:',
-        error instanceof Error ? error.message : String(error)
-      );
-      process.exit(1);
-    }
+    await program.parseAsync(process.argv);
   }
 }

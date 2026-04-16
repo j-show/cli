@@ -13,7 +13,14 @@ export const PNPM_BUILT_IN_VERSION = 'workspace:';
 /**
  * 在指定目录执行 `pnpm install --no-frozen-lockfile`。
  * @param cwd - 工作目录（默认 `process.cwd()`）
+ * @returns void
+ * @example
+ * ```ts
+ * import { installPnpm } from '@jshow/cli';
+ *
+ * installPnpm(process.cwd());
+ * ```
  */
-export const installPnpm = (cwd?: string) => {
+export const installPnpm = (cwd?: string): void => {
   execSync('pnpm install --no-frozen-lockfile', { cwd });
 };

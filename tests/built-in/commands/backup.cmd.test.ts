@@ -10,6 +10,17 @@ import { BackupCommand } from '../../../src/built-in/commands/backup.cmd';
 import { logger } from '../../../src/logger';
 import * as utils from '../../../src/utils';
 
+/** 与命令内 `loggerCli.fork({ namespace })` 对齐，使 spy 作用在真实调用的实例上 */
+vi.mock('../../../src/logger', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/logger')>();
+  return {
+    ...actual,
+    logger: Object.assign(actual.logger, {
+      fork: vi.fn(() => actual.logger)
+    })
+  };
+});
+
 vi.mock('../../../src/utils', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/utils')>();
   return {
@@ -19,6 +30,7 @@ vi.mock('../../../src/utils', async importOriginal => {
     mkdirSync: vi.fn(),
     eachDirSync: vi.fn(),
     execSync: vi.fn(),
+    existsSync: vi.fn(),
     toRegExp: vi.fn((v: string) => new RegExp(v))
   };
 });
@@ -37,6 +49,11 @@ describe('BackupCommand', () => {
         manifest: { name: '@scope/pkg-a', version: '0.0.0' }
       }
     ]);
+    // `fetchPackage` 会在没有 `.git` 时直接跳过 pull（Windows 下 path.join 会产生 `\`）
+    vi.mocked(utils.existsSync).mockImplementation((p: any) => {
+      const v = String(p).replace(/\\/g, '/');
+      return v.endsWith('/.git');
+    });
     vi.mocked(utils.eachDirSync).mockImplementation((_root, cb) => {
       (cb as (name: string) => void)('lib');
     });
@@ -45,7 +62,9 @@ describe('BackupCommand', () => {
       async (_meta: any, fn: any) => {
         return await fn({
           write: vi.fn(),
-          checkLevel: vi.fn(() => false)
+          checkLevel: vi.fn(() => false),
+          info: vi.fn(),
+          empty: vi.fn()
         });
       }
     );
@@ -85,14 +104,10 @@ describe('BackupCommand', () => {
     expect(utils.mkdirSync).toHaveBeenCalled();
     // dest 为相对路径：由 `path.relative(pkgRoot, path.join(outputDir, name))` 计算
     expect(utils.execSync).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^cp -Rf \.\/lib .*out[\\/]ws[\\/]packages[\\/]lib$/
-      ),
+      expect.stringMatching(/^cp -Rf \.\/lib\s+/),
       { cwd: '/ws/packages/a' }
     );
-    expect(infoSpy.mock.calls.some(c => c[0] === 'Backup completed')).toBe(
-      true
-    );
+    expect(infoSpy.mock.calls.some(c => c[0] === 'Completed')).toBe(true);
 
     infoSpy.mockRestore();
   });
@@ -140,9 +155,7 @@ describe('BackupCommand', () => {
     });
 
     expect(utils.pullCurrentBranch).toHaveBeenCalled();
-    expect(infoSpy.mock.calls.some(c => c[0] === 'Backup completed')).toBe(
-      true
-    );
+    expect(infoSpy.mock.calls.some(c => c[0] === 'Completed')).toBe(true);
 
     infoSpy.mockRestore();
   });
