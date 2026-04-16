@@ -27,6 +27,8 @@ import {
  * 在根目录下解析工作区包，并按包名白名单过滤。
  * @param root - 扫描根目录（通常为输入路径参数）
  * @param filterPatterns - 非空时仅保留这些 `package.json` 的 `name` 符合正则表达式的包
+ * @returns 过滤后的包信息列表
+ * @internal
  */
 const getInputPackages = (root: string, filterPatterns: RegExp[]) => {
   let packages = getWorkspacePackages(root);
@@ -40,8 +42,11 @@ const getInputPackages = (root: string, filterPatterns: RegExp[]) => {
 
 /**
  * 对单个包目录执行 `pullCurrentBranch`（含可选 prune）。
+ * @param log - 命令作用域日志器
  * @param name - 包名（用于日志）
  * @param pkgRoot - 包根目录绝对路径
+ * @returns Promise<void>
+ * @internal
  */
 const fetchPackage = async (log: Logger, name: string, pkgRoot: string) => {
   log.write(`Fetching package ${name} from ${pkgRoot}`);
@@ -53,11 +58,13 @@ const fetchPackage = async (log: Logger, name: string, pkgRoot: string) => {
 
 /**
  * 将包备份到输出目录（复制包根目录下的一级内容）。
+ * @param log - 命令作用域日志器
  * @param name - 包名
  * @param pkgRoot - 包根目录
- * @param inputRoot - 输入根目录（用于计算输出相对路径）
  * @param outputRoot - 输出根路径
  * @param filterNames - 过滤的文件/目录名称列表
+ * @returns Promise<void>
+ * @internal
  */
 const copyPackage = async (
   log: Logger,
@@ -90,6 +97,14 @@ interface BackupOptions extends CommandOptionsType {
 
 /**
  * 工作区多包备份流程：先 pull，再调用占位 `backupPackage`。
+ * @example
+ * ```ts
+ * // 该类由 CLI 自动发现并注册：文件名需以 `.cmd.ts` 结尾，且默认导出/或导出类被加载到运行时。
+ *
+ * // 运行示例：
+ * jshow backup ./code ./code_backup
+ * jshow backup ./core ./core_backup -c -f "*.test.ts"
+ * ```
  */
 export class BackupCommand extends BaseCommand<BackupOptions> {
   static name = 'backup';

@@ -40,6 +40,8 @@ const RELEASE_TYPES: ReleaseType[] = ['major', 'minor', 'patch'];
 /**
  * 将任意输入转换为合法的 `ReleaseType`；不合法则回退为 `'patch'`。
  * @param value - CLI 传入的字符串类型（如 `major` / `minor` / `patch`）
+ * @returns 合法的 release type
+ * @internal
  */
 const convertReleaseType = (value?: string): ReleaseType => {
   if (
@@ -67,7 +69,12 @@ const getPrereleaseIdentifier = (value: string): [string, ReleaseType[]] => {
   return [(version || void 0) as string, types];
 };
 
-/** 列出非 private 的包并由用户多选，返回选中的包列表 */
+/**
+ * 列出非 private 的包并交由用户多选，返回选中的包列表。
+ * @param cwd - 扫描工作区的根目录
+ * @returns 选中的包列表（可能为空数组）
+ * @internal
+ */
 const getReleasePackages = async (cwd: string) => {
   const packages = getWorkspacePackages(cwd).filter(v => !v.manifest.private);
   if (packages.length < 1) return [];
@@ -149,6 +156,9 @@ const askForNextVersion = async (
   return nextVersion;
 };
 
+/**
+ * 单个包的版本变更信息。
+ */
 interface VersionInfo {
   dir: string;
   old: string;
@@ -158,6 +168,9 @@ interface VersionInfo {
 /**
  * 计算每个包的新版本号（当前返回空对象，占位）。
  * @param packages - 待发布的包列表
+ * @param releaseType - 预选 release type
+ * @returns 包名到版本信息映射；用户取消时返回 `null`
+ * @internal
  */
 const getNewVersions = async (
   packages: PackageInfo[],
@@ -182,7 +195,14 @@ const getNewVersions = async (
   return versions;
 };
 
-const execUpdateVersionPost = (json: PackageJson, dir: string) => {
+/**
+ * 若包内存在 `scripts.updateVersion:post`，则执行该脚本做自定义收尾。
+ * @param json - 包 manifest
+ * @param dir - 包目录或 package.json 路径
+ * @returns void
+ * @internal
+ */
+const execUpdateVersionPost = (json: PackageJson, dir: string): void => {
   const postScript = json.scripts?.['updateVersion:post'];
   if (!postScript) return;
 
@@ -199,6 +219,8 @@ const execUpdateVersionPost = (json: PackageJson, dir: string) => {
 /**
  * 将 `versions` 写入各包 `package.json`，并同步更新依赖版本引用。
  * @param versions - 包名到版本信息映射
+ * @returns Promise<void>
+ * @internal
  */
 const updateVersions = async (versions: Record<string, VersionInfo>) => {
   await Promise.all(
@@ -232,6 +254,8 @@ const updateVersions = async (versions: Record<string, VersionInfo>) => {
  * @param versions - 包名到新版本的映射
  * @param force - 是否强制发布
  * @param push - 是否推送
+ * @returns Promise<void>
+ * @internal
  */
 const releasePackages = async (
   cwd: string,
@@ -297,6 +321,13 @@ interface ReleaseOptions extends CommandOptionsType {
 
 /**
  * Monorepo 发包向导：可选检查 git 状态、选择包、占位 bump 与发布。
+ * @example
+ * ```ts
+ * // 运行示例：
+ * // jshow release
+ * // jshow release --force
+ * // jshow release ./packages --check
+ * ```
  */
 export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
   static name = 'release';

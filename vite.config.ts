@@ -13,12 +13,6 @@ import pkg from './package.json';
 /** 相对项目根解析绝对路径 */
 const resolve = (p: string) => path.resolve(__dirname, p);
 
-/** Rollup external：所有 package.json 中的依赖与 devDependencies */
-const externals = new Set<string>([
-  ...Object.keys(pkg.dependencies ?? {}),
-  ...Object.keys(pkg.devDependencies ?? {})
-]);
-
 export default defineConfig({
   plugins: [
     dts({
@@ -28,22 +22,40 @@ export default defineConfig({
       logLevel: 'error'
     })
   ],
+  ssr: {
+    target: 'node'
+  },
   build: {
+    ssr: true,
     target: 'esnext',
     emptyOutDir: true,
     sourcemap: false,
-    minify: false,
-    lib: {
-      entry: resolve('src/index.ts'),
-      formats: ['cjs', 'es'],
-      fileName: format => `index.${format === 'es' ? 'mjs' : format}`
-    },
+    minify: true,
+    // lib: {
+    // entry: [resolve('src/index.ts'), resolve('src/cli.ts')]
+    // formats: ['cjs', 'es'],
+    // fileName: (format, name) => `${name}.${format === 'es' ? 'mjs' : 'cjs'}`
+    // },
     rollupOptions: {
-      external: Array.from(externals),
-      output: {
-        preserveModules: false,
-        exports: 'named'
-      }
+      external: Object.keys(pkg.dependencies ?? {}),
+      input: {
+        cli: resolve('src/cli.ts'),
+        index: resolve('src/index.ts')
+      },
+      output: [
+        {
+          format: 'cjs',
+          entryFileNames: '[name].cjs',
+          preserveModules: true,
+          preserveModulesRoot: 'src'
+        },
+        {
+          format: 'es',
+          entryFileNames: '[name].mjs',
+          preserveModules: true,
+          preserveModulesRoot: 'src'
+        }
+      ]
     }
   }
 });

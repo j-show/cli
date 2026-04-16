@@ -12,6 +12,10 @@ export default class HelloCommand extends BaseCommand {
   static name = 'hello';
   static force = false;
 
+  /**
+   * 命令参数配置。
+   * @returns 命令元信息与示例
+   */
   public get args() {
     return {
       name: 'hello',
@@ -23,14 +27,28 @@ export default class HelloCommand extends BaseCommand {
     };
   }
 
+  /**
+   * 执行前钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
+   */
   public beforeExecute(context: CommandContext): void {
     console.log('准备执行 hello 命令...');
   }
 
+  /**
+   * 命令主体逻辑（示例）。
+   * @returns void
+   */
   public execute(): void {
     console.log('Hello, World!');
   }
 
+  /**
+   * 执行后钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
+   */
   public afterExecute(context: CommandContext): void {
     const duration = Date.now() - context.startTime;
     console.log(`命令执行完成，耗时: ${duration}ms`);

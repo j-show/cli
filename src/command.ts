@@ -10,6 +10,10 @@ import { logger } from './logger';
 /** Commander 解析后的选项值：布尔开关、单值或多值 */
 export type CommandValueType = boolean | string | string[];
 
+/**
+ * 位置参数定义（对应 commander 的 `argument()`）。
+ * @description 用于声明命令的入参结构、默认值与必填规则。
+ */
 export interface CommandArgument {
   /**
    * 参数名称
@@ -61,6 +65,11 @@ export interface CommandOption extends CommandArgument {
   flagValue?: boolean;
 }
 
+/**
+ * 命令运行时解析得到的 options 对象类型。
+ * @description
+ * 该类型用于约束 `CommandContext.options`，让命令实现方可获得类型提示。
+ */
 export type CommandOptionsType = Record<string, CommandValueType>;
 
 /**
@@ -485,6 +494,17 @@ export abstract class BaseCommand<
  * @description 用于在运行时检查一个值是否为有效的命令类
  * @param value - 要检查的值
  * @returns 如果值是 BaseCommand 的实例则返回 true，否则返回 false
+ * @example
+ * ```ts
+ * import { isCommand } from '@jshow/cli';
+ *
+ * const mod = await import('./my.cmd.js');
+ * const CommandCtor = (mod.default || mod) as unknown;
+ *
+ * if (isCommand(CommandCtor)) {
+ *   // CommandCtor 现在被收窄为命令类
+ * }
+ * ```
  */
 export const isCommand = <T extends typeof BaseCommand>(
   value?: unknown
@@ -492,3 +512,4 @@ export const isCommand = <T extends typeof BaseCommand>(
   value != null &&
   typeof value === 'function' &&
   value.prototype instanceof BaseCommand;
+

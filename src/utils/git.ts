@@ -12,6 +12,13 @@ import { eachDirSync, execSync, rmSync } from './node';
 /**
  * 返回当前仓库 HEAD 的短分支名。
  * @param cwd - 工作目录，默认进程当前目录
+ * @returns 分支名；无法获取时返回空字符串
+ * @example
+ * ```ts
+ * import { getCurrentBranch } from '@jshow/cli';
+ *
+ * console.log(getCurrentBranch());
+ * ```
  */
 export const getCurrentBranch = (cwd?: string) => {
   const stdout = execSync('git rev-parse --abbrev-ref HEAD', { cwd });
@@ -27,6 +34,14 @@ export const getCurrentBranch = (cwd?: string) => {
  * 对当前分支执行 `git pull --rebase`；若 `prune` 为真则再 `git fetch --all --prune`。
  * @param prune - 是否在 pull 后 prune 远程引用
  * @param cwd - 工作目录
+ * @param verbose - 是否输出命令执行细节
+ * @returns void
+ * @example
+ * ```ts
+ * import { pullCurrentBranch } from '@jshow/cli';
+ *
+ * pullCurrentBranch(true, process.cwd(), true);
+ * ```
  */
 export const pullCurrentBranch = (
   prune = true,
@@ -42,6 +57,14 @@ export const pullCurrentBranch = (
 /**
  * 仓库脏文件列表（覆盖 staged/unstaged/untracked）。
  * @param cwd - 工作目录
+ * @returns 变更文件相对路径列表（可能为空数组）
+ * @example
+ * ```ts
+ * import { getUnCommittedFiles } from '@jshow/cli';
+ *
+ * const files = getUnCommittedFiles();
+ * if (files.length) console.log(files);
+ * ```
  */
 export const getUnCommittedFiles = (cwd?: string) => {
   // Porcelain 格式可稳定解析：包含未跟踪/已暂存/未暂存等变更
@@ -58,6 +81,13 @@ export const getUnCommittedFiles = (cwd?: string) => {
  * 最近一条提交信息：`detail` 为真时用 `%B`（含 body），否则用 `%s`（单行 subject）。
  * @param detail - 是否完整提交说明
  * @param cwd - 工作目录
+ * @returns 提交信息字符串
+ * @example
+ * ```ts
+ * import { getLastestCommitMessage } from '@jshow/cli';
+ *
+ * console.log(getLastestCommitMessage(false));
+ * ```
  */
 export const getLastestCommitMessage = (detail = true, cwd?: string) => {
   return execSync(`git log -n1 --format=${detail ? '%B' : '%s'}`, { cwd });
@@ -66,6 +96,13 @@ export const getLastestCommitMessage = (detail = true, cwd?: string) => {
 /**
  * 在 `cwd` 下用 shell 通配删除多层及根目录的 `node_modules`（破坏性操作，谨慎使用）。
  * @param cwd - 工作目录
+ * @returns void
+ * @example
+ * ```ts
+ * import { removeNodeModules } from '@jshow/cli';
+ *
+ * removeNodeModules(process.cwd());
+ * ```
  */
 export const removeNodeModules = (cwd?: string) => {
   // execSync('rm -rf ./**/**/node_modules', { cwd });
@@ -102,6 +139,13 @@ export const removeNodeModules = (cwd?: string) => {
 /**
  * 执行 `git clean -xdf`：删除未跟踪文件与目录。
  * @param cwd - 工作目录
+ * @returns void
+ * @example
+ * ```ts
+ * import { cleanGit } from '@jshow/cli';
+ *
+ * cleanGit();
+ * ```
  */
 export const cleanGit = (cwd?: string) => {
   execSync('git clean -xdf', { cwd });
@@ -110,6 +154,13 @@ export const cleanGit = (cwd?: string) => {
 /**
  * 执行 `git add -A`（暂存所有变更）。
  * @param cwd - 工作目录
+ * @returns void
+ * @example
+ * ```ts
+ * import { addGit } from '@jshow/cli';
+ *
+ * addGit();
+ * ```
  */
 export const addGit = (cwd?: string) => {
   execSync('git add -A', { cwd });
@@ -120,7 +171,19 @@ export const addGit = (cwd?: string) => {
  * @param fn - 提交信息文件路径
  * @param cwd - 工作目录
  * @description
- * 内部使用 `git commit -n` 跳过 hooks（用于自动化流程场景）。
+ * 这里通过 `-F` 读取文件，避免在命令行中拼接多行提交信息导致转义/格式问题。
+ * 路径使用 `JSON.stringify` 做最小安全引用（双引号 + 转义），降低空格/特殊字符导致的解析风险。
+ * @returns void
+ * @example
+ * ```ts
+ * import os from 'node:os';
+ * import path from 'node:path';
+ * import { commitGitByFile, writeFileSync } from '@jshow/cli';
+ *
+ * const msg = path.join(os.tmpdir(), 'commit_msg');
+ * writeFileSync(msg, 'chore: update', '', '- details');
+ * commitGitByFile(msg);
+ * ```
  */
 export const commitGitByFile = (fn: string, cwd?: string) => {
   // 使用 JSON.stringify 做最小安全引用（双引号 + 转义）
@@ -130,6 +193,13 @@ export const commitGitByFile = (fn: string, cwd?: string) => {
 /**
  * 执行 `git push` 推送当前分支。
  * @param cwd - 工作目录
+ * @returns void
+ * @example
+ * ```ts
+ * import { pushGit } from '@jshow/cli';
+ *
+ * pushGit();
+ * ```
  */
 export const pushGit = (cwd?: string) => {
   execSync('git push', { cwd });

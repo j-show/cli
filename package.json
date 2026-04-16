@@ -16,14 +16,15 @@
     "jshow",
     "jshow-cli"
   ],
-  "bin": {
-    "jshow": "./dist/cli.mjs"
-  },
   "files": [
     "dist",
+    "bin",
     "README.md",
     "README_CN.md"
   ],
+  "bin": {
+    "jshow": "./bin/cli.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -39,6 +40,7 @@
     "clean": "rm -rf ./dist && rm -rf ./out",
     "build": "pnpm clean && vite build",
     "test": "vitest --run",
+    "test:cli": "node ./bin/cli.mjs --help",
     "start": "ts-node-esm ./src/cli.ts"
   },
   "dependencies": {

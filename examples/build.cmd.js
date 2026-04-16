@@ -6,10 +6,18 @@
 /* eslint-disable */
 const { BaseCommand } = require('@jshow/cli');
 
+/**
+ * 示例：`build` 命令（CommonJS 版本）。
+ * @description 演示分组、插件声明、参数校验与错误处理钩子。
+ */
 class BuildCommand extends BaseCommand {
   static name = 'build';
   static force = false;
 
+  /**
+   * 命令参数配置。
+   * @returns {object} 命令元信息与选项定义
+   */
   get args() {
     return {
       name: 'build',
@@ -19,22 +27,25 @@ class BuildCommand extends BaseCommand {
       group: 'build',
       options: [
         {
-          flag: '--watch',
-          abbreviation: '-w',
+          name: 'watch',
+          abbr: 'w',
+          flagValue: false,
           description: '监听文件变化并自动重新构建',
           defaultValue: false,
           required: false
         },
         {
-          flag: '--mode <mode>',
-          abbreviation: '-m',
+          name: 'mode',
+          abbr: 'm',
+          flagValue: true,
           description: '构建模式 (development | production)',
           defaultValue: 'production',
           required: false
         },
         {
-          flag: '--output <dir>',
-          abbreviation: '-o',
+          name: 'output',
+          abbr: 'o',
+          flagValue: true,
           description: '输出目录',
           defaultValue: './dist',
           required: false
@@ -49,7 +60,7 @@ class BuildCommand extends BaseCommand {
       validate: options => {
         if (
           options.mode &&
-          !['development', 'production'].includes(options.mode)
+          !['development', 'production'].includes(String(options.mode))
         ) {
           return '构建模式必须是 development 或 production';
         }
@@ -58,7 +69,12 @@ class BuildCommand extends BaseCommand {
     };
   }
 
-  beforeExecute(context) {
+  /**
+   * 执行前钩子（示例）。
+   * @param {object} context - 命令上下文
+   * @returns {void}
+   */
+  async beforeExecute(context) {
     const options = context.options;
     console.log('开始构建项目 (CommonJS)...');
     console.log(`模式: ${options.mode}`);
@@ -68,7 +84,11 @@ class BuildCommand extends BaseCommand {
     }
   }
 
-  execute() {
+  /**
+   * 命令主体逻辑（示例）。
+   * @returns {void}
+   */
+  async execute() {
     const options = this.command.opts();
 
     // 模拟构建过程
@@ -85,13 +105,24 @@ class BuildCommand extends BaseCommand {
     }
   }
 
-  afterExecute(context) {
+  /**
+   * 执行后钩子（示例）。
+   * @param {object} context - 命令上下文
+   * @returns {void}
+   */
+  async afterExecute(context) {
     if (!context.options.watch) {
       const duration = Date.now() - context.startTime;
       console.log(`构建耗时: ${duration}ms`);
     }
   }
 
+  /**
+   * 错误处理钩子（示例）。
+   * @param {Error} error - 捕获到的错误
+   * @param {object} context - 命令上下文
+   * @returns {boolean} 是否已处理
+   */
   onError(error, context) {
     console.error(`构建失败: ${error.message}`);
     return true; // 错误已处理

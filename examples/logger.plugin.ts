@@ -13,15 +13,17 @@ export default class LoggerPlugin extends BasePlugin {
   static force = false;
 
   /**
-   * 设置插件优先级
-   * 数字越小优先级越高，越先执行
+   * 设置插件优先级。
+   * @returns 优先级（数字越小越先执行）
    */
   public get priority(): number {
     return 50;
   }
 
   /**
-   * 命令执行前钩子
+   * 命令执行前钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
    */
   public beforeExecute(context: CommandContext): void {
     const timestamp = new Date().toISOString();
@@ -33,7 +35,9 @@ export default class LoggerPlugin extends BasePlugin {
   }
 
   /**
-   * 命令执行后钩子
+   * 命令执行后钩子（示例）。
+   * @param context - 命令上下文
+   * @returns void
    */
   public afterExecute(context: CommandContext): void {
     const timestamp = new Date().toISOString();

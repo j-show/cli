@@ -145,7 +145,7 @@ const enhanceHelp = (program: Command): void => {
     const grouped = groupCommands(programShape.commands);
 
     if (grouped.size > 0) {
-      help += '\n\n命令分组:\n';
+      help += '\n\nCommand Groups:';
       const sortedGroups = Array.from(grouped.entries()).sort((a, b) => {
         // DEFAULT_GROUP 组放在最后
         if (a[0] === DEFAULT_GROUP) return 1;
@@ -157,9 +157,9 @@ const enhanceHelp = (program: Command): void => {
         help += `\n  ${group}:\n`;
         for (const cmd of commands) {
           const instanceArgs = cmd.instance?.args;
-          const description = instanceArgs?.description || '无描述';
+          const description = instanceArgs?.description || 'No description';
           const aliases = instanceArgs?.aliases?.length
-            ? ` (别名: ${instanceArgs?.aliases.join(', ')})`
+            ? ` (Aliases: ${instanceArgs?.aliases.join(', ')})`
             : '';
 
           help += `    ${cmd.name.padEnd(20)} ${description}${aliases}\n`;
@@ -175,8 +175,16 @@ const enhanceHelp = (program: Command): void => {
  * 将内置插件与内置命令注册到传入的 `CommandProgram` 上。
  * @param program - 一般为 `CommandProgram` 类（静态方法挂载在同一对象上）
  * @returns 可链式调用的程序类，便于 `initBuiltIn(CommandProgram).run()`
+ * @example
+ * ```ts
+ * import { CommandProgram, initBuiltIn } from '@jshow/cli';
+ *
+ * initBuiltIn(CommandProgram).run();
+ * ```
  */
-export const initBuiltIn = (program: typeof CommandProgram) => {
+export const initBuiltIn = (
+  program: typeof CommandProgram
+): typeof CommandProgram => {
   BUILT_IN_PLUGINS.forEach(plugin => {
     if (!isPlugin(plugin)) return;
     program.install(plugin, plugin.force);
@@ -347,7 +355,7 @@ export class CommandProgram {
     const program = programShape.program;
 
     // 设置版本号
-    program.version(this.version, '-v, --version', '显示版本号');
+    program.version(this.version, '-v, --version', 'program version');
 
     const plugins = programShape.plugins
       .map(p => p.instance)
