@@ -13,6 +13,14 @@ import { isPlugin, type PluginImportType } from './plugin';
 import { CommandProgram, initBuiltIn } from './program';
 import { isIgnoreDir } from './utils';
 
+/** 最大递归深度，默认 2 */
+const MAX_DEPTH = Math.max(
+  2,
+  parseInt(process.env.JSHOW_CLI_MAX_DEPTH || '2') || 2
+);
+
+const IGNORE_NAMES = (process.env.JSHOW_CLI_IGNORE_NAMES || '').split(',');
+
 /**
  * 从文件路径中提取命令名称
  * @param fn - 文件路径
@@ -43,13 +51,13 @@ const isTsNodeRuntime = (): boolean =>
  * 当前 CLI 入口文件所在目录（如 `src/`、`dist/`）。
  * 使用 `process.argv[1]`，避免在同时产出 CJS/ESM 的入口里使用 `import.meta`（TS1470）。
  */
-function getCliModuleDir(): string {
+const getCliModuleDir = (): string => {
   const main = process.argv[1];
   if (main == null || main === '') {
     return process.cwd();
   }
   return path.dirname(path.resolve(main));
-}
+};
 
 const BUILT_IN_COMMAND_PATH = path.normalize(
   path.resolve(getCliModuleDir(), 'built-in', 'commands')
@@ -68,6 +76,8 @@ const isBuiltInCommandPath = (fn: string): boolean => {
  * @param root - 要遍历的根目录路径
  * @param callback - 对每个匹配的文件执行的回调函数
  * @param ignore - 要忽略的文件或目录名称列表（默认：空数组）
+ * @param max - 最大递归深度
+ * @param level - 当前递归深度
  * @returns Promise<void>
  * @description
  * 递归遍历指定目录及其子目录，对每个以 .ts 或 .js 结尾的文件执行回调函数。
@@ -82,7 +92,9 @@ const isBuiltInCommandPath = (fn: string): boolean => {
 const traversaDirectory = async (
   root: string,
   callback: (fn: string) => void,
-  ignore: string[] = []
+  ignore: string[] = [],
+  max = 2,
+  level = 0
 ): Promise<void> => {
   const allowTs = isTsNodeRuntime();
   const list = fs.readdirSync(root);
@@ -96,7 +108,9 @@ const traversaDirectory = async (
     const stat = fs.statSync(fn);
 
     if (stat.isDirectory()) {
-      await traversaDirectory(fn, callback, ignore);
+      if (level < max) {
+        await traversaDirectory(fn, callback, ignore, max, level + 1);
+      }
       continue;
     }
 
@@ -226,17 +240,22 @@ export const runjShow = async (): Promise<void> => {
 
   log.debug(`cli version: ${CommandProgram.version}`);
 
-  await traversaDirectory(process.cwd(), fn => {
-    if (fn.endsWith('.plugin.ts') || fn.endsWith('.plugin.js')) {
-      pluginPromises.push(loadPlugin(fn, log));
-      return;
-    }
+  await traversaDirectory(
+    process.cwd(),
+    fn => {
+      if (fn.endsWith('.plugin.ts') || fn.endsWith('.plugin.js')) {
+        pluginPromises.push(loadPlugin(fn, log));
+        return;
+      }
 
-    if (fn.endsWith('.cmd.ts') || fn.endsWith('.cmd.js')) {
-      commandPromises.push(loadCommand(fn, log));
-      return;
-    }
-  });
+      if (fn.endsWith('.cmd.ts') || fn.endsWith('.cmd.js')) {
+        commandPromises.push(loadCommand(fn, log));
+        return;
+      }
+    },
+    IGNORE_NAMES,
+    MAX_DEPTH
+  );
 
   log.debug(
     `found command: ${commandPromises.length}, plugin: ${pluginPromises.length}`
