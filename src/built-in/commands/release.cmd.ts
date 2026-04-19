@@ -693,7 +693,7 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
     }
 
     logger.label('Report:');
-    logger.table(reports);
+    logger.table(reports, ['type', 'name', 'count', 'status']);
     logger.empty();
 
     logger.info('Completed');
