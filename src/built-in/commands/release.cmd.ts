@@ -7,6 +7,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { type Logger } from '@jshow/logger';
 import inquirer from 'inquirer';
 import semver, { type ReleaseType } from 'semver';
 
@@ -21,15 +22,19 @@ import {
   addGit,
   commitGitByFile,
   execSync,
+  getGroupPackages,
   getUnCommittedFiles,
-  getWorkspacePackages,
   installPnpm,
   PACKAGE_DEPENDENCY_KEYS,
+  PACKAGE_JSON_FILE,
+  type PackageGroup,
   type PackageInfo,
   type PackageJson,
   PNPM_BUILT_IN_VERSION,
   pushGit,
   readJsonSync,
+  resetGit,
+  separateGroupPackages,
   statSync,
   writeFileSync,
   writeJsonSync
@@ -37,6 +42,7 @@ import {
 
 const logger = loggerCli.fork({ namespace: 'release' });
 
+/** semver 常用的三类正式版本递增类型（交互列表的基础选项） */
 const RELEASE_TYPES: ReleaseType[] = ['major', 'minor', 'patch'];
 
 /**
@@ -57,9 +63,12 @@ const convertReleaseType = (value?: string): ReleaseType | undefined => {
 };
 
 /**
- * 根据当前版本推断 prerelease 标识符（如 `1.0.0-alpha.0` -> `alpha`），并扩展可用 release types。
+ * 根据当前版本推断 prerelease 标识符，并扩展 `semver.inc` 可用类型。
  * @param value - 当前版本号
- * @returns `[identifier, types]`：identifier 为空字符串时表示无 prerelease
+ * @returns `[identifier, types]`：`identifier` 取自 `semver.prerelease` 首段；无 prerelease 时可用 `types` 仅含 `major|minor|patch`
+ * @description
+ * 若当前为 `1.0.0-alpha.0` 这类预发版，会额外提供 `premajor` 等类型，保证 `semver.inc` 与预发标签一致。
+ * @internal
  */
 const getPrereleaseIdentifier = (value: string): [string, ReleaseType[]] => {
   const types = [...RELEASE_TYPES];
@@ -69,6 +78,85 @@ const getPrereleaseIdentifier = (value: string): [string, ReleaseType[]] => {
   if (version) types.push('premajor', 'preminor', 'prepatch', 'prerelease');
 
   return [(version || void 0) as string, types];
+};
+
+/**
+ * 检查 monorepo 根目录工作区是否干净；有未提交变更则失败并提示先提交/暂存。
+ * @param log - 当前作用域日志
+ * @param cwd - 仓库根目录
+ * @returns 可继续发版则为 `true`
+ * @internal
+ */
+const checkPackageUncommittedForMonorepo = async (log: Logger, cwd: string) => {
+  const files = getUnCommittedFiles(cwd);
+  if (files.length < 1) return true;
+
+  log.error("Repository isn't clean, commit or stash those changes first");
+
+  return false;
+};
+
+/**
+ * 针对「多仓库并列」场景检查每个待发包目录；不干净时弹出交互（跳过/重置/忽略/中止）。
+ * @description `packages` 可能被就地剔除（skip）或对部分目录执行 {@link resetGit}。
+ * @internal
+ */
+const checkPackageUncommittedForMulti = async (
+  log: Logger,
+  packages: PackageInfo[]
+) => {
+  const indexs: number[] = [];
+
+  for (let i = 0; i < packages.length; i++) {
+    const pkg = packages[i];
+    if (pkg.manifest.private) continue;
+
+    const files = getUnCommittedFiles(pkg.dir);
+    if (files.length < 1) continue;
+
+    indexs.push(i);
+  }
+
+  const { select } = await inquirer.prompt<{ select: string }>({
+    type: 'rawlist',
+    name: 'select',
+    message: [
+      'The packages are not committed, how to do?',
+      ...indexs.map(i => {
+        const pkg = packages[i];
+        return `- ${pkg.name}: ${pkg.manifest.version}`;
+      }),
+      ''
+    ].join('\n'),
+    choices: [
+      { name: 'Skip these packages', value: 'skip' },
+      { name: 'Reset the unsubmitted changes', value: 'reset' },
+      { name: 'Ignore', value: 'ignore' },
+      { name: 'Abort', value: 'abort' }
+    ],
+    default: 'skip'
+  });
+
+  switch (select) {
+    case 'skip':
+    default: {
+      const list = packages.filter((_, i) => !indexs.includes(i));
+      packages.splice(0, packages.length, ...list);
+      break;
+    }
+    case 'reset': {
+      const list = packages.filter((_, i) => indexs.includes(i));
+      for (const pkg of list) resetGit(pkg.dir);
+      break;
+    }
+    case 'ignore':
+      break;
+    case 'abort':
+      log.error('Abort the release');
+      return false;
+  }
+
+  return true;
 };
 
 /**
@@ -93,12 +181,15 @@ const filterReleasePackages = async (list: PackageInfo[]) => {
 
 /**
  * 交互式询问单个包的下一个版本号。
+ * @param log - 日志（校验失败等）
  * @param packageName - 包名（用于提示）
  * @param currVersion - 当前版本
  * @param releaseType - 预选 release type（无法计算时会进入交互选择）
  * @returns 下一个合法版本号，或 `null`（取消/非法输入）
+ * @internal
  */
 const askForNextVersion = async (
+  log: Logger,
   packageName: string,
   currVersion: string,
   releaseType?: ReleaseType
@@ -150,27 +241,31 @@ const askForNextVersion = async (
     ).version;
 
     if (!nextVersion) {
-      logger.error(`No version input`);
+      log.error(`No version input`);
       return null;
     }
   }
 
   if (!semver.valid(nextVersion)) {
-    logger.error(`Invalid version: ${nextVersion}`);
+    log.error(`Invalid version: ${nextVersion}`);
     return null;
   }
 
-  logger.empty();
+  log.empty();
 
   return nextVersion;
 };
 
 /**
  * 单个包的版本变更信息。
+ * @internal
  */
 interface VersionInfo {
+  /** 包目录 */
   dir: string;
+  /** 变更前版本 */
   old: string;
+  /** 变更后版本 */
   new: string;
 }
 
@@ -182,6 +277,7 @@ interface VersionInfo {
  * @internal
  */
 const getNewVersions = async (
+  log: Logger,
   packages: PackageInfo[],
   releaseType?: ReleaseType
 ) => {
@@ -194,7 +290,7 @@ const getNewVersions = async (
       new: ''
     };
 
-    const ver = await askForNextVersion(name, info.old, releaseType);
+    const ver = await askForNextVersion(log, name, info.old, releaseType);
     if (!ver) return null;
 
     info.new = ver;
@@ -234,7 +330,7 @@ const execUpdateVersionPost = (json: PackageJson, dir: string): void => {
 const updateVersions = async (versions: Record<string, VersionInfo>) => {
   await Promise.all(
     Object.values(versions).map(async pkg => {
-      const fn = path.join(pkg.dir, 'package.json');
+      const fn = path.join(pkg.dir, PACKAGE_JSON_FILE);
 
       const json = readJsonSync<PackageJson>(fn);
       if (!json) return;
@@ -262,15 +358,18 @@ const updateVersions = async (versions: Record<string, VersionInfo>) => {
 };
 
 /**
- * Monorepo 按计算出的版本执行发布。
- * @param cwd - 包根目录
- * @param versions - 包名到新版本的映射
- * @param force - 是否强制发布
- * @param push - 是否推送
+ * Monorepo 根目录下发版：确认、bump、`pnpm install`、提交并按需推送。
+ * @param log - 日志
+ * @param cwd - monorepo 根目录
+ * @param versions - 选中包名到新版本的映射
+ * @param force - 跳过交互确认
+ * @param push - 是否在末尾执行 `git push`
  * @returns Promise<void>
+ * @description 函数名沿用历史拼写 `Monrepo`，语义等价 monorepo。
  * @internal
  */
-const releaseMonrepoPackages = async (
+const releasePackageForMonrepo = async (
+  log: Logger,
   cwd: string,
   versions: Record<string, VersionInfo>,
   force: boolean,
@@ -292,21 +391,21 @@ const releaseMonrepoPackages = async (
     ).value;
     if (!yes) return;
 
-    logger.empty();
+    log.empty();
   }
 
-  logger.step('Update version...');
+  log.step('Update version...');
   await updateVersions(versions);
 
-  logger.step('Install dependencies...');
+  log.step('Install dependencies...');
   installPnpm(cwd);
 
   if (getUnCommittedFiles(cwd).length < 1) {
-    logger.error('No uncommitted changes');
+    log.error('No uncommitted changes');
     return;
   }
 
-  logger.step('Committing...');
+  log.step('Committing...');
   addGit(cwd);
 
   const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
@@ -320,12 +419,17 @@ const releaseMonrepoPackages = async (
   commitGitByFile(commitMsgFile, cwd);
 
   if (push) {
-    logger.step('Pushing...');
+    log.step('Pushing...');
     pushGit(cwd);
   }
 };
 
-const releaseMultiPackages = async (
+/**
+ * 多独立包场景：可对选中包逐一安装、提交并推送。
+ * @internal
+ */
+const releasePackageForMulti = async (
+  log: Logger,
   data: Record<string, VersionInfo>,
   force: boolean,
   push: boolean
@@ -354,26 +458,26 @@ const releaseMultiPackages = async (
       versions[key] = data[key];
     }
 
-    logger.empty();
+    log.empty();
   }
 
-  logger.step('Update version...');
+  log.step('Update version...');
   await updateVersions(versions);
 
-  logger.empty();
+  log.empty();
   for (const [name, ver] of Object.entries(versions)) {
-    await logger.scope({ namespace: name }, async log => {
+    await log.scope({ namespace: name }, async clog => {
       const cwd = ver.dir;
 
-      log.step('Install dependencies...');
+      clog.step('Install dependencies...');
       installPnpm(cwd);
 
       if (getUnCommittedFiles(cwd).length < 1) {
-        log.error('No uncommitted changes');
+        clog.error('No uncommitted changes');
         return;
       }
 
-      log.step('Committing...');
+      clog.step('Committing...');
       addGit(cwd);
 
       const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
@@ -382,19 +486,104 @@ const releaseMultiPackages = async (
       commitGitByFile(commitMsgFile, cwd);
 
       if (push) {
-        log.step('Pushing...');
+        clog.step('Pushing...');
         pushGit(cwd);
       }
     });
   }
 };
 
-/** `release` 命令解析后的选项类型 */
+/**
+ * 处理「多个并列独立包」发版入口：校验、过滤交互、计算版本并调用 {@link releasePackageForMulti}。
+ * @internal
+ */
+const releaseMultiPackages = async (
+  log: Logger,
+  packages: PackageInfo[],
+  { check, type, force, push }: ReleaseOptions
+) => {
+  if (check) {
+    const status = await checkPackageUncommittedForMulti(log, packages);
+    if (!status) return false;
+  }
+
+  const selected = await filterReleasePackages(packages);
+  if (selected.length === 0) {
+    log.warn('No packages to release');
+    return false;
+  }
+
+  log.empty();
+  log.label('Will bump:');
+  log.label(
+    selected.map(o => `    ${o.name} ${o.manifest.version}`).join('\n')
+  );
+  log.empty();
+
+  const versions = await getNewVersions(
+    log,
+    selected,
+    convertReleaseType(type)
+  );
+  if (!versions) return false;
+
+  await releasePackageForMulti(log, versions, !!force, !!push);
+
+  return true;
+};
+
+/**
+ * 处理单个 monorepo 根（含 `children`）的发版入口。
+ * @internal
+ */
+const releaseMonrepoPackage = async (
+  log: Logger,
+  { dir, children }: PackageGroup,
+  { check, type, force, push }: ReleaseOptions
+) => {
+  if (check) {
+    const status = await checkPackageUncommittedForMonorepo(log, dir);
+    if (!status) return false;
+  }
+
+  const selected = await filterReleasePackages(children);
+  if (selected.length === 0) {
+    log.warn('No packages to release');
+    return false;
+  }
+
+  log.empty();
+  log.label('Will bump:');
+  log.label(
+    selected.map(o => `    ${o.name} ${o.manifest.version}`).join('\n')
+  );
+  log.empty();
+
+  const versions = await getNewVersions(
+    log,
+    selected,
+    convertReleaseType(type)
+  );
+  if (!versions) return false;
+
+  await releasePackageForMonrepo(log, dir, versions, !!force, !!push);
+
+  return true;
+};
+
+/**
+ * `release` 命令解析后的选项类型。
+ * @internal
+ */
 interface ReleaseOptions extends CommandOptionsType {
-  check?: boolean;
-  push?: boolean;
+  /** 发版前是否检查工作区干净 */
+  check: boolean;
+  /** 预选 `semver` release type（如 `patch`） */
   type?: string;
-  force?: boolean;
+  /** 是否跳过确认提示 */
+  force: boolean;
+  /** 是否在提交后 `git push` */
+  push: boolean;
 }
 
 /**
@@ -423,8 +612,7 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
       arguments: [
         {
           name: 'input',
-          description: 'The input directory',
-          required: false
+          description: 'The input directory'
         }
       ],
       options: [
@@ -457,7 +645,7 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
 
   public async execute({
     args,
-    options: { check = true, type, force = false, push = true }
+    options
   }: CommandContext<ReleaseOptions>): Promise<void> {
     let [inputRoot = '.'] = args;
 
@@ -469,42 +657,45 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
     });
     logger.empty();
 
-    if (check) {
-      const files = getUnCommittedFiles(inputRoot);
-      if (files.length > 0) {
-        logger.error(
-          "Repository isn't clean, commit or stash those changes first"
-        );
-        process.exit(1);
+    const packages = getGroupPackages(inputRoot);
+    const [multiPackages, monorepoPackages] = separateGroupPackages(packages);
+
+    const reports: Array<[string, string, number, boolean]> = [];
+
+    if (multiPackages.length > 0) {
+      logger.label(`Release multi packages: ${multiPackages.length}`);
+
+      await logger.scope({ namespace: 'multi' }, async log => {
+        const status = await releaseMultiPackages(log, multiPackages, options);
+
+        reports.push(['multi', '-', multiPackages.length, status]);
+      });
+
+      logger.label('--------------------------------');
+      logger.empty();
+    }
+
+    const mpcount = monorepoPackages.length;
+    if (mpcount > 0) {
+      logger.label(`Release monorepo packages: ${mpcount}`);
+
+      for (const pkg of monorepoPackages) {
+        await logger.scope({ namespace: `mrepo: ${pkg.name}` }, async log => {
+          const status = await releaseMonrepoPackage(log, pkg, options);
+
+          reports.push(['mono', pkg.name, pkg.children.length, status]);
+        });
+        logger.empty();
       }
+
+      logger.label('--------------------------------');
+      logger.empty();
     }
 
-    const packages = getWorkspacePackages(inputRoot);
-    const corePkg = packages.find(o => !!o.manifest.private);
-
-    const selected = await filterReleasePackages(packages);
-    if (selected.length === 0) {
-      logger.warn('No packages to release');
-      process.exit(1);
-    }
-
-    logger.empty();
-    logger.label('Will bump:');
-    logger.label(
-      selected.map(o => `    ${o.name} ${o.manifest.version}`).join('\n')
-    );
+    logger.label('Report:');
+    logger.table(reports);
     logger.empty();
 
-    const versions = await getNewVersions(selected, convertReleaseType(type));
-    if (!versions) process.exit(1);
-
-    if (corePkg) {
-      await releaseMonrepoPackages(corePkg.dir, versions, !!force, !!push);
-    } else {
-      await releaseMultiPackages(versions, !!force, !!push);
-    }
-
-    logger.empty();
     logger.info('Completed');
   }
 }

@@ -9,6 +9,10 @@ const { BaseCommand } = require('@jshow/cli');
 /**
  * 示例：`build` 命令（CommonJS 版本）。
  * @description 演示分组、插件声明、参数校验与错误处理钩子。
+ * @example
+ * ```
+ * jshow build -w
+ * ```
  */
 class BuildCommand extends BaseCommand {
   static name = 'build';

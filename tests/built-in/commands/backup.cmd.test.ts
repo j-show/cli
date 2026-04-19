@@ -25,7 +25,8 @@ vi.mock('../../../src/utils', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/utils')>();
   return {
     ...actual,
-    getWorkspacePackages: vi.fn(),
+    /** 备份命令扫描包列表由 {@link getGroupPackages} 提供，而非 `getWorkspacePackages` */
+    getGroupPackages: vi.fn(),
     pullCurrentBranch: vi.fn(),
     mkdirSync: vi.fn(),
     eachDirSync: vi.fn(),
@@ -42,11 +43,12 @@ describe('BackupCommand', () => {
   beforeEach(() => {
     cmd = new Command('backup');
     backup = new BackupCommand(cmd, []);
-    vi.mocked(utils.getWorkspacePackages).mockReturnValue([
+    vi.mocked(utils.getGroupPackages).mockReturnValue([
       {
         dir: '/ws/packages/a',
         name: '@scope/pkg-a',
-        manifest: { name: '@scope/pkg-a', version: '0.0.0' }
+        manifest: { name: '@scope/pkg-a', version: '0.0.0' },
+        children: []
       }
     ]);
     // `fetchPackage` 会在没有 `.git` 时直接跳过 pull（Windows 下 path.join 会产生 `\`）
@@ -113,16 +115,18 @@ describe('BackupCommand', () => {
   });
 
   it('filter 选项应按包名正则过滤工作区包', async () => {
-    vi.mocked(utils.getWorkspacePackages).mockReturnValue([
+    vi.mocked(utils.getGroupPackages).mockReturnValue([
       {
         dir: '/ws/p1',
         name: '@scope/keep',
-        manifest: { name: '@scope/keep', version: '0.0.0' }
+        manifest: { name: '@scope/keep', version: '0.0.0' },
+        children: []
       },
       {
         dir: '/ws/p2',
         name: '@scope/skip',
-        manifest: { name: '@scope/skip', version: '0.0.0' }
+        manifest: { name: '@scope/skip', version: '0.0.0' },
+        children: []
       }
     ]);
     const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});

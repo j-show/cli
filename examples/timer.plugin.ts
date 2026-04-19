@@ -7,6 +7,10 @@ import { BasePlugin, type CommandContext } from '@jshow/cli';
 
 /**
  * 示例：在 `afterExecute` 中根据耗时选择秒或毫秒输出。
+ * @example
+ * ```ts
+ * // 在命令 args.plugins 中包含 'timer'
+ * ```
  */
 export default class TimerPlugin extends BasePlugin {
   static name = 'timer';

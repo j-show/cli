@@ -158,8 +158,8 @@ export interface CommandContext<
 }
 
 /**
- * 命令插件接口
- * @description 用于在命令执行前后执行钩子函数
+ * 命令运行时挂载的插件视图（框架注入给 {@link BaseCommand}）。
+ * @description 仅暴露名称与钩子；与全局 {@link BasePlugin} 并存，二者通过名称对齐。
  * @internal
  */
 interface CommandPlugin {

@@ -54,3 +54,24 @@ export const toRegExp = (source: string, defaultFlags = ''): RegExp => {
 
   return new RegExp(s, defaultFlags);
 };
+
+/**
+ * 将逗号分隔的模式字符串转为多个 {@link RegExp}（空段会被丢弃）。
+ * @param source - 例如 `"^foo$,/bar/i"`；各段交由 {@link toRegExp} 解析
+ * @returns 非空正则数组
+ * @example
+ * ```ts
+ * import { toPatterns } from '@jshow/cli';
+ *
+ * const [a, b] = toPatterns('^pkg-,/\\.test\\./i');
+ * ```
+ */
+export const toPatterns = (source: string) => {
+  return source
+    .split(',')
+    .map(o => {
+      const v = o && o.trim();
+      return v ? toRegExp(v) : null;
+    })
+    .filter(Boolean) as RegExp[];
+};

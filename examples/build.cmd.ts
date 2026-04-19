@@ -12,6 +12,7 @@ import {
 
 /**
  * `build` 命令可用的选项类型。
+ * @description 示例文件内部约束 `opts()` 形状；无需对外导出。
  */
 type BuildOptions = CommandOptionsType & {
   watch?: boolean;
@@ -21,6 +22,11 @@ type BuildOptions = CommandOptionsType & {
 
 /**
  * 示例：`build` 命令，演示分组、多选项、`validate` 与 `onError`。
+ * @example
+ * ```bash
+ * jshow build --watch
+ * jshow build -m development -o ./out
+ * ```
  */
 export default class BuildCommand extends BaseCommand<BuildOptions> {
   static name = 'build';
