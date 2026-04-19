@@ -7,6 +7,10 @@ import { BasePlugin, type CommandContext } from '@jshow/cli';
 
 /**
  * 示例：高优先级日志插件，在前后钩子中打印时间与参数。
+ * @example
+ * ```ts
+ * // 在命令 args.plugins 中包含 'logger'
+ * ```
  */
 export default class LoggerPlugin extends BasePlugin {
   static name = 'logger';

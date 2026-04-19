@@ -7,6 +7,19 @@ import cp from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * 同步判断路径是否存在。
+ * @param ph - 文件或目录路径
+ * @returns 存在则为 `true`
+ * @example
+ * ```ts
+ * import { existsSync } from '@jshow/cli';
+ *
+ * if (existsSync('./package.json')) {
+ *   // ...
+ * }
+ * ```
+ */
 export const existsSync = (ph: string): boolean => {
   return fs.existsSync(ph);
 };
@@ -55,7 +68,7 @@ export const chmodSync = (ph: string, mode: number | string): void => {
  * 遍历 `root` 目录下的一级子项（不递归）。
  *
  * @param root - 目录路径
- * @param callback - 回调；返回 `false` 可提前终止遍历
+ * @param callback - 回调；显式 `return false` 可提前终止遍历
  * @param ignores - 要忽略的条目类型（默认忽略符号链接）
  * @returns void
  *
@@ -73,7 +86,7 @@ export const chmodSync = (ph: string, mode: number | string): void => {
  */
 export const eachDirSync = (
   root: string,
-  callback: (name: string, ph: string, stat: fs.Stats) => false | void,
+  callback: (name: string, ph: string, stat: fs.Stats) => boolean | void,
   ignores: Array<'link' | 'dir' | 'file'> = ['link']
 ) => {
   const list = fs.readdirSync(root);
@@ -251,38 +264,74 @@ export interface ExecSyncOptions extends Pick<
  * import { execSync } from '@jshow/cli';
  *
  * const branch = execSync('git rev-parse --abbrev-ref HEAD');
+ * execSync('pnpm -v', { cwd: './packages/a', verbose: true });
  * ```
  */
 export const execSync = (
   command: string,
   { verbose = false, silent = false, ...options }: ExecSyncOptions = {}
 ) => {
-  const stdout = cp.execSync(command, {
+  const opts: cp.ExecSyncOptions = {
     encoding: 'utf-8',
-    // 默认需要读取 stdout（很多工具函数依赖返回值）；verbose 时直接继承输出
-    stdio: silent ? 'ignore' : verbose ? 'inherit' : 'pipe',
     ...options
-  });
+  };
+
+  // 默认需要读取 stdout（很多工具函数依赖返回值）；verbose 时继承子进程 stdio
+  if (opts.stdio == null) {
+    if (silent) opts.stdio = 'ignore';
+    else if (verbose) opts.stdio = 'inherit';
+    else opts.stdio = 'pipe';
+  }
+
+  const stdout = cp.execSync(command, opts);
 
   return stdout ? stdout.toString().trim() : '';
 };
 
+/** 工作区识别与读写时使用的 manifest 文件名 */
+export const PACKAGE_JSON_FILE = 'package.json';
+
 /**
  * `package.json` 的最小结构（工具函数使用到的字段子集）。
+ * @description 仅覆盖发版/依赖扫描相关字段，并非完整 npm 包定义。
  */
 export interface PackageJson {
+  /** 包名 */
   name: string;
+  /** 当前版本 */
   version: string;
+  /** 是否为私有包（私有根常作为 monorepo 聚合包） */
   private?: boolean;
+  /** 作用域等元信息（部分场景会写入） */
+  scope?: string;
+  /** npm scripts */
   scripts?: Record<string, string>;
+  /** 生产依赖 */
   dependencies?: Record<string, string>;
+  /** 开发依赖 */
   devDependencies?: Record<string, string>;
+  /** 同级依赖 */
   peerDependencies?: Record<string, string>;
+  /** 可选依赖 */
   optionalDependencies?: Record<string, string>;
+  /** pnpm 专有字段（如 overrides） */
   pnpm?: {
     overrides?: Record<string, string>;
   };
 }
+
+/**
+ * 参与依赖扫描/改写的 `package.json` 顶层字段联合。
+ * @description 排除 `optionalDependencies`：默认批量 bump 不触碰可选依赖，降低误改风险。
+ */
+export type PackageJsonKey = keyof Pick<
+  PackageJson,
+  | 'dependencies'
+  | 'devDependencies'
+  | 'peerDependencies'
+  | 'optionalDependencies'
+  | 'pnpm'
+>;
 
 /**
  * 依赖字段 key 列表（用于批量扫描/改写依赖版本）。
@@ -300,19 +349,33 @@ export const PACKAGE_DEPENDENCY_KEYS = [
   'peerDependencies'
 ] as const;
 
-/** 工作区扫描得到的单个包信息 */
+/**
+ * 工作区扫描得到的单个包信息。
+ * @description `dir` 一般为含 `package.json` 的目录绝对路径。
+ */
 export interface PackageInfo {
+  /** 包根目录（绝对路径） */
   dir: string;
+  /** `manifest.name` */
   name: string;
+  /** 解析后的 `package.json` */
   manifest: PackageJson;
 }
 
-/** 扫描时跳过的目录名（不含前缀点目录的通用规则见 `isIgnoreDir`） */
+/**
+ * 私有根（monorepo）包及其子包聚合。
+ * @description `children` 由 `getWorkspacePackages` 在根目录为 `private` 时填充。
+ */
+export interface PackageGroup extends PackageInfo {
+  /** 工作区内子包列表；非 monorepo 时为空数组 */
+  children: PackageInfo[];
+}
+
+/** 扫描时跳过的目录名（点目录由 `isIgnoreDir` 另行过滤） */
 const IGNORE_DIRS = ['dist', 'node_modules'];
 
-/** 是否跳过以 `.` 开头或位于 `IGNORE_DIRS` 中的目录名 */
 /**
- * 是否忽略目录名（点目录与常见依赖目录）。
+ * 是否忽略目录名（以 `.` 开头或为 `node_modules`/`dist`）。
  * @param dir - 目录名（非路径）
  * @returns 是否应跳过
  * @example
@@ -328,23 +391,33 @@ export const isIgnoreDir = (dir: string): boolean => {
   return dir.startsWith('.') || IGNORE_DIRS.includes(dir);
 };
 
+/**
+ * 读取 `package.json` 并写入扫描列表；缺少 `name` 则跳过。
+ * @param packages - 结果聚合数组（就地修改）
+ * @param fn - `package.json` 绝对或相对路径
+ * @returns 成功解析时返回 `PackageInfo`，否则 `null`
+ * @internal
+ */
 const fillPackage = (packages: PackageInfo[], fn: string) => {
   const manifest = readJsonSync<PackageJson>(fn);
-  if (!manifest?.name) return;
+  if (!manifest?.name) return null;
 
-  packages.push({
+  const info: PackageInfo = {
     dir: path.dirname(fn),
     name: manifest.name,
     manifest
-  });
+  };
+  packages.push(info);
+
+  return info;
 };
 
 /**
  * 自 `root` 起递归查找含 `package.json` 的子目录，收集 `name` 非空的包列表。
  * @param root - 扫描根目录，默认 `process.cwd()`
- * @param level - 当前递归深度
  * @param max - 最大递归深度
- * @param packages - 累积结果（递归用）
+ * @param level - 当前递归深度（内部递归用，调用方通常省略）
+ * @param packages - 累积结果（内部递归用，调用方通常省略）
  * @returns 每个条目含目录绝对路径、包名与解析后的 manifest
  * @example
  * ```ts
@@ -356,22 +429,20 @@ const fillPackage = (packages: PackageInfo[], fn: string) => {
  */
 export const getWorkspacePackages = (
   root = process.cwd(),
+  max = 2,
   level = 0,
-  max = 3,
   packages: PackageInfo[] = []
 ) => {
   if (!existsSync(root)) return packages;
 
-  fillPackage(packages, path.join(root, 'package.json'));
-
   eachDirSync(
     root,
     (name, dir) => {
-      const fn = path.join(dir, 'package.json');
+      const fn = path.join(dir, PACKAGE_JSON_FILE);
 
       if (!existsSync(fn)) {
         if (!isIgnoreDir(name) && level < max) {
-          getWorkspacePackages(dir, level + 1, max, packages);
+          getWorkspacePackages(dir, max, level + 1, packages);
         }
 
         return;
@@ -383,4 +454,89 @@ export const getWorkspacePackages = (
   );
 
   return packages;
+};
+
+/**
+ * 扫描并归类「独立包」与「monorepo 根」。
+ *
+ * @description
+ * - 若 `root` 下存在 `package.json` 且 `private: true`，则将工作区内子包填入该根的 `children`
+ * - 否则在一级子目录上继续递归（用于多仓并列的工作区布局）
+ *
+ * @param root - 扫描根目录，默认 `process.cwd()`
+ * @param max - 最大递归深度
+ * @param level - 当前递归深度（内部用）
+ * @param packages - 聚合结果（内部用）
+ * @returns `PackageGroup[]`，每项要么为单包，要么为带子包的 monorepo 根
+ * @example
+ * ```ts
+ * import { getGroupPackages } from '@jshow/cli';
+ *
+ * const groups = getGroupPackages(process.cwd());
+ * for (const g of groups) {
+ *   console.log(g.name, g.children.length);
+ * }
+ * ```
+ */
+export const getGroupPackages = (
+  root = process.cwd(),
+  max = 3,
+  level = 0,
+  packages: PackageGroup[] = []
+) => {
+  if (!existsSync(root)) return packages;
+
+  const pkg = fillPackage(packages, path.join(root, PACKAGE_JSON_FILE));
+
+  if (pkg) {
+    const group = pkg as PackageGroup;
+    group.children = [];
+
+    if (pkg.manifest.private) {
+      group.children = getWorkspacePackages(root);
+    }
+
+    return packages;
+  }
+
+  eachDirSync(
+    root,
+    (name, dir) => {
+      if (isIgnoreDir(name)) return;
+      if (level >= max) return;
+
+      getGroupPackages(dir, max, level + 1, packages);
+    },
+    ['file']
+  );
+
+  return packages;
+};
+
+/**
+ * 将 `getGroupPackages` 结果拆分为「独立包列表」与「monorepo 根列表」。
+ * @param packages - `getGroupPackages` 的返回值
+ * @returns `[multiPackages, monorepoRoots]`：`children` 非空视为 monorepo 根
+ * @example
+ * ```ts
+ * import { getGroupPackages, separateGroupPackages } from '@jshow/cli';
+ *
+ * const [singles, monos] = separateGroupPackages(getGroupPackages('.'));
+ * ```
+ */
+export const separateGroupPackages = (
+  packages: PackageGroup[]
+): [PackageInfo[], PackageGroup[]] => {
+  const multiPackages: PackageInfo[] = [];
+  const monorepoPackages: PackageGroup[] = [];
+
+  for (const pkg of packages) {
+    if (pkg.children.length > 0) {
+      monorepoPackages.push(pkg);
+    } else {
+      multiPackages.push(pkg);
+    }
+  }
+
+  return [multiPackages, monorepoPackages];
 };

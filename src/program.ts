@@ -11,7 +11,10 @@ import { BUILT_IN_COMMANDS, BUILT_IN_PLUGINS } from './built-in';
 import { isCommand, type BaseCommand, type CommandClassType } from './command';
 import { isPlugin, type BasePlugin, type PluginClassType } from './plugin';
 
-/** 顶层命令名，用于 Commander `Usage:` 行（与 `package.json` 中 bin `jshow` 一致） */
+/**
+ * 顶层可执行名，用于 Commander `Usage:` 与帮助标题（与 `package.json` 中 `bin` 一致）。
+ * @internal
+ */
 const CLI_PROGRAM_NAME = 'jshow';
 
 /**
@@ -61,11 +64,16 @@ interface CommandType {
   group?: string;
 }
 
+/**
+ * 创建根 `Command` 实例（名称恒为 {@link CLI_PROGRAM_NAME}）。
+ * @internal
+ */
 const buildProgram = (): Command => new Command(CLI_PROGRAM_NAME);
 
 /**
- * 程序状态对象
- * @description 存储所有已注册的命令和 Commander 程序实例
+ * 程序单例状态：插件列表、命令表与 Commander 根实例。
+ * @description `reset()` 时会整体替换 `program`，以清除已挂载的子命令。
+ * @internal
  */
 const programShape = {
   plugins: [] as PluginType[],
@@ -81,6 +89,7 @@ const programShape = {
   program: buildProgram()
 };
 
+/** 命令未声明 `group` 时在帮助分组中的默认桶名 */
 const DEFAULT_GROUP = 'default';
 
 /**
@@ -328,8 +337,14 @@ export class CommandProgram {
   /**
    * 清理所有已注册的命令和插件（主要用于测试）
    * @description 清空所有已注册的命令和插件，重置程序状态
+   * @param autoRun - 为 `true` 时在重置后立即执行内置初始化并 `run()`（测试辅助）
    * @static
    * @internal
+   * @example
+   * ```ts
+   * CommandProgram.reset();
+   * CommandProgram.reset(true);
+   * ```
    */
   static reset(autoRun?: boolean): void {
     // 重新创建 program 实例以清除所有命令

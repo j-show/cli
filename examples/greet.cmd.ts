@@ -13,7 +13,7 @@ import {
 /**
  * `greet` 命令可用的选项类型。
  * @description
- * commander 默认会把带值选项解析为字符串；这里用 `string`，避免示例与真实行为不一致。
+ * commander 会把带值选项解析为字符串；此处显式标注，避免类型与运行时行为漂移。
  */
 type GreetOptions = CommandOptionsType & {
   name?: string;
@@ -23,6 +23,11 @@ type GreetOptions = CommandOptionsType & {
 
 /**
  * 示例：`greet` 命令，演示字符串/布尔/数值类选项与自定义校验。
+ * @example
+ * ```bash
+ * jshow greet -n Alice --formal
+ * jshow greet -t 3
+ * ```
  */
 export default class GreetCommand extends BaseCommand<GreetOptions> {
   static name = 'greet';

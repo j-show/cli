@@ -167,6 +167,24 @@ export const addGit = (cwd?: string) => {
 };
 
 /**
+ * 先 `git add -A` 再 `git reset --hard`，丢弃工作区与暂存区变更（危险操作）。
+ * @param cwd - 工作目录
+ * @returns void
+ * @description
+ * 与 `git clean` 不同，本操作不处理未跟踪文件；需要时由调用方另作清理。
+ * @example
+ * ```ts
+ * import { resetGit } from '@jshow/cli';
+ *
+ * resetGit('./packages/foo');
+ * ```
+ */
+export const resetGit = (cwd?: string) => {
+  addGit(cwd);
+  execSync('git reset --hard', { cwd });
+};
+
+/**
  * 使用 `git commit -F <file>` 从文件读取提交信息并提交。
  * @param fn - 提交信息文件路径
  * @param cwd - 工作目录

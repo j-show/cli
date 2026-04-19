@@ -14,6 +14,12 @@ export default [
     }
   },
   {
+    files: ['src/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-invalid-void-type': 'off'
+    }
+  },
+  {
     // 为 examples 目录中的 CommonJS 文件添加特殊配置
     files: ['tests/**/*.{js,ts}', 'scripts/*.{js,ts}', 'examples/**/*.{js,ts}'],
     rules: {

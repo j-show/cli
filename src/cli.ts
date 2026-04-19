@@ -13,12 +13,19 @@ import { isPlugin, type PluginImportType } from './plugin';
 import { CommandProgram, initBuiltIn } from './program';
 import { isIgnoreDir } from './utils';
 
-/** 最大递归深度，默认 2 */
+/**
+ * 命令/插件发现的最大递归深度（至少为 2）。
+ * @description 可通过环境变量 `JSHOW_CLI_MAX_DEPTH` 覆盖，避免在极深目录树中扫描过久。
+ */
 const MAX_DEPTH = Math.max(
   2,
   parseInt(process.env.JSHOW_CLI_MAX_DEPTH || '2') || 2
 );
 
+/**
+ * 跳过的顶层目录名列表（逗号分隔）。
+ * @description 来自 `JSHOW_CLI_IGNORE_NAMES`，用于在 monorepo 中排除无关子项目。
+ */
 const IGNORE_NAMES = (process.env.JSHOW_CLI_IGNORE_NAMES || '').split(',');
 
 /**
@@ -49,7 +56,11 @@ const isTsNodeRuntime = (): boolean =>
 
 /**
  * 当前 CLI 入口文件所在目录（如 `src/`、`dist/`）。
- * 使用 `process.argv[1]`，避免在同时产出 CJS/ESM 的入口里使用 `import.meta`（TS1470）。
+ * @returns 入口脚本所在目录；无法解析时退回 `process.cwd()`
+ * @description
+ * 使用 `process.argv[1]` 而非 `import.meta.url`，避免在同时产出 CJS/ESM 的入口里触发 TS1470，
+ * 并与 `node ./dist/cli.mjs` 一类启动方式一致。
+ * @internal
  */
 const getCliModuleDir = (): string => {
   const main = process.argv[1];
@@ -59,10 +70,19 @@ const getCliModuleDir = (): string => {
   return path.dirname(path.resolve(main));
 };
 
+/**
+ * 打包后内置命令目录的规范化绝对路径（用于跳过对工作区同名路径的重复加载）。
+ * @internal
+ */
 const BUILT_IN_COMMAND_PATH = path.normalize(
   path.resolve(getCliModuleDir(), 'built-in', 'commands')
 );
 
+/**
+ * 判断路径是否位于 CLI 自带的 `built-in/commands` 目录下。
+ * @description 避免把包内已注册的内置命令再当作用户项目文件扫描一遍。
+ * @internal
+ */
 const isBuiltInCommandPath = (fn: string): boolean => {
   const abs = path.normalize(path.resolve(fn));
   return (
@@ -84,7 +104,7 @@ const isBuiltInCommandPath = (fn: string): boolean => {
  * 可以指定要忽略的文件或目录名称。
  * @example
  * ```typescript
- * await traversaDirectory('./src', (file) => {
+ * await traversaDirectory('./src', file => {
  *   console.log('Found file:', file);
  * }, ['node_modules', '.git']);
  * ```

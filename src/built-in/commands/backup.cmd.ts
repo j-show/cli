@@ -18,10 +18,10 @@ import {
   eachDirSync,
   execSync,
   existsSync,
-  getWorkspacePackages,
+  getGroupPackages,
   mkdirSync,
   pullCurrentBranch,
-  toRegExp
+  toPatterns
 } from '../../utils';
 
 const logger = loggerCli.fork({ namespace: 'backup' });
@@ -34,7 +34,7 @@ const logger = loggerCli.fork({ namespace: 'backup' });
  * @internal
  */
 const getInputPackages = (root: string, filterPatterns: RegExp[]) => {
-  let packages = getWorkspacePackages(root);
+  let packages = getGroupPackages(root);
 
   if (filterPatterns.length > 0) {
     packages = packages.filter(o => filterPatterns.some(p => p.test(o.name)));
@@ -94,9 +94,14 @@ const copyPackage = async (
   log.write(`Copied successfully\n`);
 };
 
-/** `backup` 命令解析后的选项类型 */
+/**
+ * `backup` 命令解析后的选项类型。
+ * @internal
+ */
 interface BackupOptions extends CommandOptionsType {
-  clean?: boolean;
+  /** 是否在输出侧排除 `.git` */
+  clean: boolean;
+  /** 逗号分隔包名过滤模式，见 {@link toPatterns} */
   filter?: string;
 }
 
@@ -132,8 +137,7 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
         {
           name: 'output',
           description: 'The output directory',
-          defaultValue: '../backup',
-          required: false
+          defaultValue: '../backup'
         }
       ],
       options: [
@@ -154,7 +158,7 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
 
   public async execute({
     args,
-    options: { filter = '', clean = true }
+    options: { clean, filter = '' }
   }: CommandContext<BackupOptions>): Promise<void> {
     let [inputRoot, outputRoot] = args;
 
@@ -168,13 +172,7 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
     });
     logger.empty();
 
-    const patterns = filter
-      .split(',')
-      .map(o => {
-        const v = o && o.trim();
-        return v ? toRegExp(v) : null;
-      })
-      .filter(Boolean) as RegExp[];
+    const patterns = toPatterns(filter);
     const packages = getInputPackages(inputRoot, patterns);
 
     const filters = ['node_modules'];

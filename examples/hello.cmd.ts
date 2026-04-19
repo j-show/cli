@@ -7,6 +7,11 @@ import { BaseCommand, type CommandContext } from '@jshow/cli';
 
 /**
  * 示例：最小 `hello` 命令，演示生命周期钩子。
+ * @example
+ * ```bash
+ * jshow hello
+ * jshow hi
+ * ```
  */
 export default class HelloCommand extends BaseCommand {
   static name = 'hello';
