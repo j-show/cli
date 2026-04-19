@@ -38,16 +38,21 @@ interface PackageItem {
 interface PackageData {
   name: string;
   ver: string;
+  updated: boolean;
   items: PackageItem[];
 }
 
 interface UpgradeParams {
   IGNORE_PATTERNS: RegExp[];
+  PKG_VERSIONS: Record<string, PackageData>;
+}
+
+interface UpgradeMultiParams extends UpgradeParams {
   DIFF_VERSIONS: Record<string, PackageItem[]>;
   ROOT_VERSIONS: Record<string, string>;
 }
 
-interface UpgradeMonorepoParams extends UpgradeParams {
+interface UpgradeMonorepoParams extends UpgradeMultiParams {
   ROOT_DIR: string;
   ROOT_JSON: PackageJson;
   LOCAL_VERSIONS: Omit<PackageData, 'items'>[];
@@ -94,12 +99,13 @@ const fillPackageVersions = (
   file: string,
   type: PackageJsonKey
 ) => {
-  const name = pkg.name;
-  const scope = pkg.scope || '';
-  const record = (type === 'pnpm' ? pkg.pnpm?.overrides : pkg[type]) || {};
+  const root = type === 'pnpm';
+  const { name, scope = '' } = pkg;
+  const record = (root ? pkg.pnpm?.overrides : pkg[type]) || {};
 
-  Object.entries(record).forEach(([k, v]) => {
-    if (v.startsWith(VERSION_WORKSPACE)) return;
+  const entries = Object.entries(record);
+  for (const [k, v] of entries) {
+    if (v.startsWith(VERSION_WORKSPACE)) continue;
 
     if (scope) {
       ROOT_VERSIONS[k] = v;
@@ -116,12 +122,13 @@ const fillPackageVersions = (
     }
 
     item.vers[type] = v;
-  });
+  }
 };
 
 const preparePackageJson = (
   upgradeParams: UpgradeParams,
-  { dir, manifest }: PackageInfo
+  { dir, manifest }: PackageInfo,
+  root?: boolean
 ) => {
   const file = path.join(dir, PACKAGE_JSON_FILE);
 
@@ -130,33 +137,30 @@ const preparePackageJson = (
   fillPackageVersions(upgradeParams, manifest, file, 'peerDependencies');
   fillPackageVersions(upgradeParams, manifest, file, 'optionalDependencies');
 
-  if (manifest.private) {
+  if (root) {
     fillPackageVersions(upgradeParams, manifest, file, 'pnpm');
   }
 };
 
-const filterRootPackageVersions = (
+const filterRootVersions = (
   { IGNORE_PATTERNS, ROOT_VERSIONS, DIFF_VERSIONS }: UpgradeParams,
   versions: PackageData[] = [],
   SCOPE_PREFIX?: string
 ) => {
-  Object.entries(ROOT_VERSIONS).forEach(([name, ver]) => {
-    if (
-      !ver ||
-      IGNORE_PATTERNS.some(p => p.test(name)) ||
-      (SCOPE_PREFIX && name.startsWith(SCOPE_PREFIX))
-    ) {
-      return;
-    }
+  const entries = Object.entries(ROOT_VERSIONS);
+  for (const [name, ver] of entries) {
+    if (!ver) continue;
+    if (IGNORE_PATTERNS.some(p => p.test(name))) continue;
+    if (SCOPE_PREFIX && name.startsWith(SCOPE_PREFIX)) continue;
 
     const items = DIFF_VERSIONS[name];
-    if (!items) return;
+    if (!items) continue;
 
     const useds = getUseds(items);
-    if (!useds.some(o => checkVersion(o, ver))) return;
+    if (!useds.some(o => checkVersion(o, ver))) continue;
 
-    versions.push({ name, ver, items });
-  });
+    versions.push({ name, ver, updated: false, items });
+  }
 
   return versions;
 };
@@ -181,7 +185,7 @@ const fetchPublicPackageVersion = async (
   const items = filterPackageItems(upgradeParams, name, ver, list);
   if (items.length < 1) return null;
 
-  return { name, ver, items };
+  return { name, ver, updated: true, items };
 };
 
 const fetchPrivatePackageVersions = async (
@@ -225,17 +229,16 @@ const fetchPrivatePackageVersions = async (
       if (items.length < 1) return;
     }
 
-    versions.push({ name, ver, items });
+    versions.push({ name, ver, updated: true, items });
   });
 };
 
 const getMultiPackageVersions = async (
   params: UpgradeParams,
-  scope?: string
+  scope?: string,
+  versions: PackageData[] = []
 ) => {
-  const versions: PackageData[] = [];
-
-  const list = filterRootPackageVersions(params, [], scope);
+  const list = filterRootVersions(params, [], scope);
 
   for (const item of list) {
     const version = await fetchPublicPackageVersion(
@@ -290,14 +293,22 @@ const upgradeMultiPackages = async (
   packages: PackageInfo[],
   params: UpgradeParams
 ) => {
-  for (const pkg of packages) preparePackageJson(params, pkg);
+  const upgradeParams: UpgradeMultiParams = {
+    ...params,
+    DIFF_VERSIONS: {},
+    ROOT_VERSIONS: {}
+  };
 
-  showUsedPackages(log, params.DIFF_VERSIONS);
+  for (const pkg of packages) preparePackageJson(upgradeParams, pkg);
 
-  const versions = await getMultiPackageVersions(params);
-  if (versions.length < 1) return;
+  showUsedPackages(log, upgradeParams.DIFF_VERSIONS);
+
+  const versions = await getMultiPackageVersions(upgradeParams);
+  if (versions.length < 1) return false;
 
   showNeedChangePackages(log, versions);
+
+  return true;
 };
 
 const upgradeMonorepoPackage = async (
@@ -309,19 +320,24 @@ const upgradeMonorepoPackage = async (
     ...params,
     ROOT_DIR: group.dir,
     ROOT_JSON: group.manifest,
-    LOCAL_VERSIONS: [{ name: group.name, ver: group.manifest.version }]
+    DIFF_VERSIONS: {},
+    ROOT_VERSIONS: {},
+    LOCAL_VERSIONS: [
+      { name: group.name, ver: group.manifest.version, updated: false }
+    ]
   };
 
-  preparePackageJson(upgradeParams, group);
-
+  preparePackageJson(upgradeParams, group, true);
   for (const pkg of group.children) preparePackageJson(upgradeParams, pkg);
 
   showUsedPackages(log, upgradeParams.DIFF_VERSIONS);
 
   const versions = await getMonorepoPackageVersions(upgradeParams);
-  if (versions.length < 1) return;
+  if (versions.length < 1) return false;
 
   showNeedChangePackages(log, versions);
+
+  return true;
 };
 
 interface UpgradeOptions extends CommandOptionsType {
@@ -399,37 +415,49 @@ export class UpgradeCommand extends BaseCommand<UpgradeOptions> {
 
     const upgradeParams: UpgradeParams = {
       IGNORE_PATTERNS: toPatterns(ignore),
-      DIFF_VERSIONS: {},
-      ROOT_VERSIONS: {}
+      PKG_VERSIONS: {}
     };
 
+    const reports: Array<[string, string, number, boolean]> = [];
+
     if (multiPackages.length > 0) {
-      logger.label('Multi package mode');
-      logger.empty();
+      logger.label(`Upgrade multi packages: ${multiPackages.length}`);
 
       await logger.scope({ namespace: 'mult' }, async log => {
-        await upgradeMultiPackages(logger, multiPackages, upgradeParams);
+        const status = await upgradeMultiPackages(
+          log,
+          multiPackages,
+          upgradeParams
+        );
+
+        reports.push(['multi', '-', multiPackages.length, status]);
       });
 
+      logger.label('--------------------------------');
       logger.empty();
-      logger.info('Completed');
-
-      return;
     }
 
-    const monorepoPackage = monorepoPackages[0];
-    if (monorepoPackage) {
-      logger.label('Monorepo package mode');
+    const mpcount = monorepoPackages.length;
+    if (mpcount > 0) {
+      logger.label(`Upgrade monorepo packages: ${mpcount}`);
+
+      for (const pkg of monorepoPackages) {
+        await logger.scope({ namespace: `mrepo: ${pkg.name}` }, async log => {
+          const status = await upgradeMonorepoPackage(log, pkg, upgradeParams);
+
+          reports.push(['mono', pkg.name, pkg.children.length, status]);
+        });
+        logger.empty();
+      }
+
+      logger.label('--------------------------------');
       logger.empty();
-
-      await logger.scope({ namespace: monorepoPackage.name }, async log => {
-        await upgradeMonorepoPackage(log, monorepoPackage, upgradeParams);
-      });
-
-      logger.empty();
-      logger.info('Completed');
-
-      return;
     }
+
+    logger.label('Report:');
+    logger.table(reports, ['type', 'name', 'count', 'status']);
+    logger.empty();
+
+    logger.info('Completed');
   }
 }
