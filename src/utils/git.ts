@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { eachDirSync, execSync, rmSync } from './node';
+import { eachDirSync, execSync, rmSync, writeFileSync } from './node';
 
 /**
  * 返回当前仓库 HEAD 的短分支名。
@@ -127,6 +127,7 @@ export const removeNodeModules = (cwd?: string) => {
     eachDirSync(
       dir,
       (_name, childPath, stat) => {
+        // BFS 遍历源码目录，已删除的 node_modules 不再作为子树根深入
         if (!stat.isDirectory()) return;
         if (path.basename(childPath) === 'node_modules') return;
         queue.push(childPath);
@@ -167,6 +168,23 @@ export const addGit = (cwd?: string) => {
 };
 
 /**
+ * 返回工作区与暂存区相对 HEAD 的差异文本（`git diff`）。
+ * @param cwd - 工作目录
+ * @returns stdout 字符串；无差异或命令无输出时为 `''`
+ * @example
+ * ```ts
+ * import { diffGit } from '@jshow/cli';
+ *
+ * if (diffGit('./packages/foo')) {
+ *   // 存在未提交变更
+ * }
+ * ```
+ */
+export const diffGit = (cwd?: string) => {
+  return execSync('git diff', { cwd });
+};
+
+/**
  * 先 `git add -A` 再 `git reset --hard`，丢弃工作区与暂存区变更（危险操作）。
  * @param cwd - 工作目录
  * @returns void
@@ -182,6 +200,20 @@ export const addGit = (cwd?: string) => {
 export const resetGit = (cwd?: string) => {
   addGit(cwd);
   execSync('git reset --hard', { cwd });
+};
+
+/**
+ * 将多行提交信息写入系统临时目录下的文件。
+ * @param name - 临时文件名（不含路径）
+ * @param msgs - 提交信息行（会按行写入）
+ * @returns 临时文件绝对路径
+ * @internal
+ */
+const buildCommitFile = (name: string, msgs: string[]) => {
+  const fn = path.join(os.tmpdir(), name);
+  writeFileSync(fn, msgs);
+
+  return fn;
 };
 
 /**
@@ -203,9 +235,28 @@ export const resetGit = (cwd?: string) => {
  * commitGitByFile(msg);
  * ```
  */
-export const commitGitByFile = (fn: string, cwd?: string) => {
+const commitGitByFile = (fn: string, cwd?: string) => {
   // 使用 JSON.stringify 做最小安全引用（双引号 + 转义）
-  execSync(`git commit -F ${JSON.stringify(fn)}`, { cwd });
+  execSync(`git commit -F ${fn}`, { cwd });
+};
+
+/**
+ * 使用临时文件执行 `git commit -F`（支持多行 subject/body）。
+ * @param msg - 单行字符串或按行拆分的提交信息数组
+ * @param cwd - 工作目录
+ * @returns void
+ * @example
+ * ```ts
+ * import { commitGit } from '@jshow/cli';
+ *
+ * commitGit(['chore: bump deps', '', '- lodash ^4.17.21']);
+ * ```
+ */
+export const commitGit = (msg: string | string[], cwd?: string): void => {
+  if (!Array.isArray(msg)) return commitGit([msg], cwd);
+
+  const fn = buildCommitFile('commit_msg_file', msg);
+  commitGitByFile(fn, cwd);
 };
 
 /**

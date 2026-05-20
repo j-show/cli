@@ -15,7 +15,7 @@ const { BaseCommand } = require('@jshow/cli');
  * ```
  */
 class BuildCommand extends BaseCommand {
-  static name = 'build';
+  static key = 'build';
   static force = false;
 
   /**

@@ -154,7 +154,7 @@ class BuildCommand extends BaseCommand {
 
 要创建自定义插件，需要：
 1. 继承 `BasePlugin` 类
-2. 设置 `static name` 属性
+2. 设置 `static key`（推荐）和/或 `static name` 作为注册名
 3. 实现 `beforeExecute` 和/或 `afterExecute` 方法
 4. 可选：设置 `priority` 属性控制执行顺序
 
@@ -176,7 +176,7 @@ class BuildCommand extends BaseCommand {
 - 必须使用 `export default` 导出类
 - 命令类必须继承 `BaseCommand`
 - 插件类必须继承 `BasePlugin`
-- 必须设置 `static name` 属性
+- 建议设置 `static key`；亦可用 `static name`（与 `CommandProgram` 注册键一致）
 - `args`、`beforeExecute` 和 `afterExecute` 应使用 `public` 访问修饰符
 
 ### CommonJS 文件
@@ -189,12 +189,12 @@ class BuildCommand extends BaseCommand {
   Node.js 的 `import()` 会自动将 `module.exports` 的值作为 `default` 导出，无需手动设置 `module.exports.default`
 - 命令类必须继承 `BaseCommand`
 - 插件类必须继承 `BasePlugin`
-- 必须设置 `static name` 属性
+- 建议设置 `static key`；亦可用 `static name`
 
 ### 插件使用
 
 - 在命令类的 `args` getter 中通过 `plugins` 数组声明要使用的插件
-- 插件名称必须与插件类的 `static name` 属性匹配
+- 插件名称须与插件类的 `static key`（或 `static name`）一致
 - 插件会按照优先级顺序执行（优先级数字越小，执行越早）
 
 **示例：**

@@ -17,9 +17,7 @@ export default defineConfig({
   plugins: [
     dts({
       entryRoot: resolve('src'),
-      tsconfigPath: resolve('tsconfig.json'),
-      outDir: resolve('dist'),
-      logLevel: 'error'
+      tsconfigPath: resolve('tsconfig.json')
     })
   ],
   ssr: {
@@ -36,7 +34,7 @@ export default defineConfig({
     // formats: ['cjs', 'es'],
     // fileName: (format, name) => `${name}.${format === 'es' ? 'mjs' : 'cjs'}`
     // },
-    rollupOptions: {
+    rolldownOptions: {
       external: Object.keys(pkg.dependencies ?? {}),
       input: {
         cli: resolve('src/cli.ts'),

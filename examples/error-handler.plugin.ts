@@ -15,7 +15,7 @@ import { BasePlugin, type CommandContext } from '@jshow/cli';
  * ```
  */
 export default class ErrorHandlerPlugin extends BasePlugin {
-  static name = 'error-handler';
+  static key = 'error-handler';
   static force = false;
 
   /**
@@ -32,7 +32,7 @@ export default class ErrorHandlerPlugin extends BasePlugin {
    * @param context - 命令上下文
    * @returns void
    */
-  public beforeExecute(context: CommandContext): void {
+  public async beforeExecute(context: CommandContext): Promise<void> {
     // 可以在这里设置错误处理环境
     console.log(`[ErrorHandler] 准备执行命令: ${context.name}`);
   }
@@ -42,7 +42,7 @@ export default class ErrorHandlerPlugin extends BasePlugin {
    * @param context - 命令上下文
    * @returns void
    */
-  public afterExecute(context: CommandContext): void {
+  public async afterExecute(context: CommandContext): Promise<void> {
     const duration = Date.now() - context.startTime;
     if (duration > 5000) {
       console.warn(

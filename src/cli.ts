@@ -1,9 +1,10 @@
 /**
- * @fileoverview CLI 入口文件
- * @description 自动扫描并加载项目中的命令文件，然后运行 CLI 程序
+ * @fileoverview 可执行 CLI 入口（构建为 `dist/cli.mjs`）
+ * @description
+ * 自 `process.cwd()` 扫描 `.plugin.ts|.js` 与 `.cmd.ts|.js`，注册到 `CommandProgram` 后调用 `initBuiltIn` 挂载内置命令并执行 `parseAsync`。
+ * 本模块在加载末尾会立即启动 CLI；若仅需复用扫描逻辑请从 `utils` 等模块组合，而不要仅 side-effect import 本文件。
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -11,7 +12,7 @@ import { type CommandImportType, isCommand } from './command';
 import { logger } from './logger';
 import { isPlugin, type PluginImportType } from './plugin';
 import { CommandProgram, initBuiltIn } from './program';
-import { isIgnoreDir } from './utils';
+import { isIgnoreDir, lstatSyncSafe, readdirSyncSafe } from './utils';
 
 /**
  * 命令/插件发现的最大递归深度（至少为 2）。
@@ -31,13 +32,13 @@ const IGNORE_NAMES = (process.env.JSHOW_CLI_IGNORE_NAMES || '').split(',');
 /**
  * 从文件路径中提取命令名称
  * @param fn - 文件路径
- * @param key - 命令或插件
+ * @param key - 后缀类型：`cmd` 或 `plugin`
  * @returns 命令名称（去除扩展名和 .cmd | .plugin 后缀）
  * @example
- * getName('/path/to/example.cmd.ts') // 'example'
- * getName('/path/to/test.cmd.js') // 'test'
+ * getKey('/path/to/example.cmd.ts') // 'example'
+ * getKey('/path/to/test.cmd.js') // 'test'
  */
-const getName = (fn: string, key: 'cmd' | 'plugin'): string =>
+const getKey = (fn: string, key: 'cmd' | 'plugin'): string =>
   path.basename(fn, path.extname(fn)).replace(`.${key}`, '');
 
 /**
@@ -50,6 +51,7 @@ const getName = (fn: string, key: 'cmd' | 'plugin'): string =>
  * 进而导致 Node 直接执行 TypeScript 失败。
  */
 const isTsNodeRuntime = (): boolean =>
+  process.env.JSHOW_CLI_TS_RUNTIME === '1' ||
   process.execArgv.some(arg => arg.includes('ts-node')) ||
   Boolean(process.env.TS_NODE_PROJECT) ||
   Boolean(process.env.TS_NODE_COMPILER_OPTIONS);
@@ -92,16 +94,16 @@ const isBuiltInCommandPath = (fn: string): boolean => {
 };
 
 /**
- * 递归遍历目录
- * @param root - 要遍历的根目录路径
- * @param callback - 对每个匹配的文件执行的回调函数
- * @param ignore - 要忽略的文件或目录名称列表（默认：空数组）
- * @param max - 最大递归深度
- * @param level - 当前递归深度
- * @returns Promise<void>
+ * 递归遍历目录，对符合条件的命令/插件源文件执行回调（实现上的命名保留历史拼写 `traversa`）。
+ * @param root - 扫描根目录
+ * @param callback - 命中 `.ts` / `.js` 文件时调用（路径为绝对或相对于扫描根的拼接路径）
+ * @param ignore - 额外跳过的目录名（与 {@link isIgnoreDir} 叠加）
+ * @param max - 最大目录深度（不含根为 0 的语义由 `level` 与循环共同约束）
+ * @param level - 当前深度，调用方传入 `0` 即可
+ * @returns 遍历结束时 resolved 的 Promise
  * @description
- * 递归遍历指定目录及其子目录，对每个以 .ts 或 .js 结尾的文件执行回调函数。
- * 可以指定要忽略的文件或目录名称。
+ * `.ts` 仅在 ts-node 相关环境（`execArgv` 含 `ts-node` 或存在 `TS_NODE_*` 变量）为真时参与加载，避免生产环境直接 `import()` 源码失败。
+ * 跳过包内已注册的内置命令物理目录，避免重复加载。
  * @example
  * ```typescript
  * await traversaDirectory('./src', file => {
@@ -117,7 +119,7 @@ const traversaDirectory = async (
   level = 0
 ): Promise<void> => {
   const allowTs = isTsNodeRuntime();
-  const list = fs.readdirSync(root);
+  const list = readdirSyncSafe(root);
 
   for (const item of list) {
     if (isIgnoreDir(item) || ignore.includes(item)) continue;
@@ -125,7 +127,8 @@ const traversaDirectory = async (
     const fn = path.join(root, item);
     if (isBuiltInCommandPath(fn)) continue;
 
-    const stat = fs.statSync(fn);
+    const stat = lstatSyncSafe(fn);
+    if (!stat || stat.isSymbolicLink()) continue;
 
     if (stat.isDirectory()) {
       if (level < max) {
@@ -136,6 +139,7 @@ const traversaDirectory = async (
 
     if (!stat.isFile()) continue;
     if (!fn.endsWith('.ts') && !fn.endsWith('.js')) continue;
+    // 无 ts-node 时不加载 .ts，避免 Node 直接执行 TypeScript 报错
     if (fn.endsWith('.ts') && !allowTs) continue;
 
     await callback(fn);
@@ -151,7 +155,7 @@ const traversaDirectory = async (
  * 动态导入插件文件，验证是否为有效的插件类，然后注册到 CommandProgram。
  * 支持 TypeScript (.ts) 和 JavaScript (.js) 文件。
  * 支持 ES Module 和 CommonJS 格式。
- * 如果插件类没有设置 name 属性，会从文件名自动提取。
+ * 若类上未设置 `static key`，则用文件名推导并写入 `plugin.key`（与 {@link CommandProgram.install} 的注册键一致）。
  * 如果加载失败，会输出警告信息但不会中断程序执行。
  * @example
  * ```typescript
@@ -180,7 +184,7 @@ const loadPlugin = async (fn: string, log: typeof logger): Promise<void> => {
     // 检查是否为有效的插件
     if (!isPlugin(plugin)) return;
 
-    if (!plugin.name) plugin.name = getName(fn, 'plugin');
+    if (!plugin.key) plugin.key = getKey(fn, 'plugin');
 
     // 注册插件
     CommandProgram.install(plugin, plugin.force);
@@ -198,7 +202,7 @@ const loadPlugin = async (fn: string, log: typeof logger): Promise<void> => {
  * 动态导入命令文件，验证是否为有效的命令类，然后注册到 CommandProgram。
  * 支持 TypeScript (.ts) 和 JavaScript (.js) 文件。
  * 支持 ES Module 和 CommonJS 格式。
- * 如果命令类没有设置 name 属性，会从文件名自动提取。
+ * 若类上未设置 `static key`，则用文件名推导并写入 `module.key`。
  * @example
  * ```typescript
  * await loadCommand('./commands/build.cmd.ts');
@@ -226,31 +230,24 @@ const loadCommand = async (fn: string, log: typeof logger): Promise<void> => {
     // 检查是否为有效的命令类
     if (!isCommand(module)) return;
 
-    // 如果命令类没有设置 name 属性，从文件名提取
-    if (!module.name) module.name = getName(fn, 'cmd');
+    // 若未显式设置 static key，则用文件名推导并写入（仍可与 static name 组合用于 Commander 注册键）
+    if (!module.key) module.key = getKey(fn, 'cmd');
 
     // 注册命令
     CommandProgram.use(module, module.force);
   } catch (error) {
-    log.error(`加载命令文件 "${fn}" 时出错:`, error);
-    throw error;
+    // 外部工作目录里的命令文件可能依赖其自身的运行环境（依赖未装、模块格式不兼容等）。
+    // 这里降级为 warn，避免单个命令文件导致整个 CLI（包括 --help）无法启动。
+    log.warn(`加载命令文件 "${fn}" 时出错:`, error);
   }
 };
 
 /**
- * 运行 jShow CLI 程序
- * @returns Promise<void>
+ * 扫描工作区、注册动态命令/插件并运行 Commander 解析流程。
+ * @returns 解析与命令体执行完成时 settled 的 Promise
  * @description
- * 1. 从当前工作目录加载所有插件
- * 2. 安装所有已启用的插件
- * 3. 从当前工作目录加载所有命令
- * 4. 运行 CLI 程序，解析命令行参数并执行相应命令
- * @example
- * ```ts
- * import { runjShow } from '@jshow/cli';
- *
- * await runjShow();
- * ```
+ * 顺序：`traversaDirectory` 收集待加载模块 → `Promise.all` 并发 `import()` → `initBuiltIn(CommandProgram)` → `CommandProgram.run()`。
+ * 本函数由本文件顶层 `void runjShow().catch(...)` 调用；包根 `index` 不导出本符号，以免误 import 即启动 CLI。
  */
 export const runjShow = async (): Promise<void> => {
   const log = logger.fork({ namespace: 'initialize' });
@@ -263,6 +260,7 @@ export const runjShow = async (): Promise<void> => {
   await traversaDirectory(
     process.cwd(),
     fn => {
+      // 扫描阶段只收集 Promise，统一 await，避免边遍历边阻塞目录树
       if (fn.endsWith('.plugin.ts') || fn.endsWith('.plugin.js')) {
         pluginPromises.push(loadPlugin(fn, log));
         return;
@@ -289,10 +287,13 @@ export const runjShow = async (): Promise<void> => {
   const program = initBuiltIn(CommandProgram);
   log.debug('init built-in done');
 
-  await program.run();
+  // 显式 `await` 具名 Promise，避免部分打包器将 `await Class.run()` 错误折叠为未等待的调用。
+  const runPromise = program.run();
+  await runPromise;
 };
 
 void runjShow().catch((err: unknown) => {
+  // 顶层启动失败时给出可读信息并非零退出，便于 CI/脚本判断
   logger.error(
     '❌ 启动失败:',
     err instanceof Error ? err.message : String(err)

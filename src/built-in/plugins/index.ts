@@ -5,5 +5,7 @@
 
 import { type PluginClassType } from '../../plugin';
 
-/** 启动时由 `initBuiltIn` 安装的插件类 */
+/**
+ * 随 `initBuiltIn` 安装的默认插件类列表（当前为空，占位供后续内置插件）。
+ */
 export const BUILT_IN_PLUGINS: PluginClassType[] = [];

@@ -10,7 +10,7 @@ const { BaseCommand } = require('@jshow/cli');
  * 示例：最小 `hello` 命令（CommonJS 版本）。
  */
 class HelloCommand extends BaseCommand {
-  static name = 'hello';
+  static key = 'hello';
   static force = false;
 
   /**

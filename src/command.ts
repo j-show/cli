@@ -7,7 +7,10 @@ import { type Command } from 'commander';
 
 import { logger } from './logger';
 
-/** Commander 解析后的选项值：布尔开关、单值或多值 */
+/**
+ * Commander 解析后的单个选项值类型。
+ * @description 布尔开关、单值字符串，或 variadic 多值数组。
+ */
 export type CommandValueType = boolean | string | string[];
 
 /**
@@ -58,19 +61,20 @@ export interface CommandOption extends CommandArgument {
    */
   abbr?: string;
   /**
-   * 选项是否有值
-   * @description 如果为 true，选项没有值，否则选项有值
+   * 是否在长选项后附加 Commander 占位参数（`<name>` / `[name]` 等，见 {@link CommandArgument}）。
+   * @description
+   * - `true`：生成 `--option <arg>` 形式，需配合 `required` / `variadic` 等描述占位符语义。
+   * - `false`：布尔开关，仅 `--option`（可选 `defaultValue` 参与解析）。
    * @default false
    */
   flagValue?: boolean;
 }
 
 /**
- * 命令运行时解析得到的 options 对象类型。
- * @description
- * 该类型用于约束 `CommandContext.options`，让命令实现方可获得类型提示。
+ * 命令运行时解析得到的 `options` 对象类型。
+ * @description 键为 {@link CommandOption.name}，值由 Commander 解析；未出现的键可能为 `undefined`。
  */
-export type CommandOptionsType = Record<string, CommandValueType>;
+export type CommandOptionsType = Record<string, CommandValueType | undefined>;
 
 /**
  * 命令参数配置接口
@@ -166,7 +170,7 @@ interface CommandPlugin {
   /**
    * 插件名称
    */
-  name: string;
+  key: string;
   /**
    * 命令执行前钩子
    */
@@ -204,19 +208,23 @@ const getOptionFlag = (item: CommandOption) => {
 };
 
 /**
- * 命令类类型定义
- * @description 表示一个可以实例化的命令类
+ * 可注册的命令类构造函数签名。
+ * @template T - 实例类型，默认为 {@link BaseCommand}
  */
 export type CommandClassType<T extends BaseCommand = BaseCommand> = new (
+  /** Commander 子命令实例 */
   command: Command,
+  /** 已安装且被本命令 `args.plugins` 选中的插件视图 */
   plugins: CommandPlugin[]
 ) => T;
 
 /**
- * 命令导入类型定义
- * @description 表示一个命令模块的导入结果
+ * 动态 `import()` 命令模块后的类型形状。
  */
-export type CommandImportType = { default: CommandClassType };
+export type CommandImportType = {
+  /** 默认导出的命令类 */
+  default: CommandClassType;
+};
 
 /**
  * 命令基类
@@ -225,7 +233,7 @@ export type CommandImportType = { default: CommandClassType };
  * @example
  * ```typescript
  * class MyCommand extends BaseCommand {
- *   static name = 'my-command';
+ *   static key = 'my-command';
  *   static force = false;
  *
  *   protected get args(): CommandArgs {
@@ -273,7 +281,7 @@ export abstract class BaseCommand<
    * @description 必须在子类中设置，用于命令注册
    * @default ''
    */
-  static name: string = '';
+  static key: string = '';
 
   /**
    * 是否强制覆盖同名命令（静态属性）
@@ -306,11 +314,15 @@ export abstract class BaseCommand<
 
   /**
    * 获取命令名称（实例属性）
-   * @description 如果静态属性 name 未设置，会尝试从类名获取
+   * @description 如果静态属性 key 未设置，会尝试从类名获取
    * @returns 命令名称，从构造函数中获取
    */
-  public get name(): string {
-    return Object.getPrototypeOf(this)?.constructor?.name ?? this.args.name;
+  public get key(): string {
+    const constructor = (Object.getPrototypeOf(this)?.constructor ?? {}) as {
+      key?: string;
+      name?: string;
+    };
+    return constructor.key || constructor.name || this.args.name;
   }
 
   /**
@@ -321,8 +333,8 @@ export abstract class BaseCommand<
    * @protected
    */
   protected getPlugins(): CommandPlugin[] {
-    const names = this.args.plugins ?? [];
-    return this.plugins.filter(p => names.includes(p.name));
+    const keys = this.args.plugins ?? [];
+    return this.plugins.filter(p => keys.includes(p.key));
   }
 
   /**
@@ -376,10 +388,11 @@ export abstract class BaseCommand<
    */
   protected async setupAction(): Promise<void> {
     this.command.action(async (...inputs: unknown[]) => {
+      // Commander 将 action 回调的最后一个参数固定为 Command 实例，位置参数在其之前
       const options = this.command.opts() as T;
       const args = inputs.slice(0, -1) as string[];
       const context: CommandContext<T> = {
-        name: this.name,
+        name: this.key,
         options,
         args,
         startTime: Date.now()
@@ -388,7 +401,7 @@ export abstract class BaseCommand<
       try {
         const plugins = this.getPlugins();
 
-        // 执行前钩子
+        // 钩子顺序：已安装插件（按 priority 升序）→ 命令自身 → execute → 命令 after → 插件 after
         await Promise.all(
           plugins
             .map(plugin => plugin.beforeExecute?.(context))
@@ -490,10 +503,10 @@ export abstract class BaseCommand<
 }
 
 /**
- * 类型守卫：检查值是否为命令类
- * @description 用于在运行时检查一个值是否为有效的命令类
- * @param value - 要检查的值
- * @returns 如果值是 BaseCommand 的实例则返回 true，否则返回 false
+ * 类型守卫：检查值是否为命令类（构造函数且原型链继承 {@link BaseCommand}）。
+ * @description 用于动态 `import()` 后收窄模块默认导出。
+ * @param value - 要检查的值（通常为 `mod.default` 或 `mod` 本身）
+ * @returns 若为合法命令类则返回 true
  * @example
  * ```ts
  * import { isCommand } from '@jshow/cli';

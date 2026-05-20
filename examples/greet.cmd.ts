@@ -30,7 +30,7 @@ type GreetOptions = CommandOptionsType & {
  * ```
  */
 export default class GreetCommand extends BaseCommand<GreetOptions> {
-  static name = 'greet';
+  static key = 'greet';
   static force = false;
 
   /**

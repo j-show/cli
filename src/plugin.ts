@@ -1,22 +1,23 @@
 /**
  * @fileoverview 插件系统
- * @description 提供插件接口和插件管理器，支持命令执行前后的钩子函数
+ * @description 提供 `BasePlugin` 基类与 `isPlugin` 守卫；插件按 `priority` 排序后在命令 `action` 前后触发钩子。
  */
 
 import { type CommandContext } from './command';
 
 /**
- * 插件类类型定义
- * @description 表示一个可以实例化的插件类
- * @template T - 插件类型，默认为 BasePlugin
+ * 可注册的插件类构造函数签名。
+ * @template T - 实例类型，默认为 {@link BasePlugin}
  */
 export type PluginClassType<T extends BasePlugin = BasePlugin> = new () => T;
 
 /**
- * 插件导入类型定义
- * @description 表示一个插件模块的导入结果
+ * 动态 `import()` 插件模块后的类型形状。
  */
-export type PluginImportType = { default: PluginClassType };
+export type PluginImportType = {
+  /** 默认导出的插件类 */
+  default: PluginClassType;
+};
 
 /**
  * 插件基类
@@ -25,11 +26,11 @@ export type PluginImportType = { default: PluginClassType };
  * @example
  * ```typescript
  * class MyPlugin extends BasePlugin {
- *   static name = 'my-plugin';
+ *   static key = 'my-plugin';
  *   static force = false;
  *
  *   public get priority(): number {
- *     return 50; // 优先级越高（数字越小）越先执行
+ *     return 50; // 数字越小越先执行（与 CommandProgram.install 中的排序一致）
  *   }
  *
  *   public async beforeExecute(context: CommandContext): Promise<void> {
@@ -49,7 +50,7 @@ export class BasePlugin {
    * @description 必须在子类中设置，用于插件注册
    * @default ''
    */
-  static name: string = '';
+  static key: string = '';
 
   /**
    * 是否强制覆盖同名插件（静态属性）
@@ -60,11 +61,15 @@ export class BasePlugin {
 
   /**
    * 获取插件名称（实例属性）
-   * @description 如果静态属性 name 未设置，会尝试从类名获取
+   * @description 如果静态属性 key 未设置，会尝试从类名获取
    * @returns 插件名称
    */
-  public get name(): string {
-    return Object.getPrototypeOf(this)?.constructor?.name ?? '';
+  public get key(): string {
+    const constructor = (Object.getPrototypeOf(this)?.constructor ?? {}) as {
+      key?: string;
+      name?: string;
+    };
+    return constructor.key || constructor.name || '';
   }
 
   /**
@@ -106,10 +111,10 @@ export class BasePlugin {
 }
 
 /**
- * 类型守卫：检查值是否为插件类
- * @description 用于在运行时检查一个值是否为有效的插件类
- * @param value - 要检查的值
- * @returns 如果值是 BasePlugin 的实例则返回 true，否则返回 false
+ * 类型守卫：检查值是否为插件类（构造函数且原型链继承 {@link BasePlugin}）。
+ * @description 用于动态 `import()` 后收窄模块默认导出。
+ * @param value - 要检查的值（通常为 `mod.default` 或 `mod` 本身）
+ * @returns 若为合法插件类则返回 true
  * @template T - 插件类型
  * @example
  * ```typescript

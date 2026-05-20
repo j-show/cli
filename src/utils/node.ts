@@ -7,6 +7,121 @@ import cp from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import yaml from 'js-yaml';
+
+/**
+ * 是否为可安全跳过的文件系统错误（无权限、不存在、被占用等）。
+ * @internal
+ */
+export const isFsSkippedError = (err: unknown): boolean => {
+  if (err == null || typeof err !== 'object' || !('code' in err)) return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return (
+    code === 'EPERM' ||
+    code === 'EACCES' ||
+    code === 'ENOENT' ||
+    code === 'EBUSY'
+  );
+};
+
+/**
+ * 同步读取 UTF-8 文本；遇 {@link isFsSkippedError} 时返回空字符串。
+ * @param fn - 文件路径
+ * @returns 去除首尾空白的内容，失败或跳过时为 `''`
+ */
+export const readfileSyncSafe = (fn: string): string => {
+  try {
+    return (fs.readFileSync(fn, 'utf8') || '').trim();
+  } catch (err) {
+    if (isFsSkippedError(err)) return '';
+    throw err;
+  }
+};
+
+/**
+ * 同步读取目录项；遇 {@link isFsSkippedError} 时返回空数组而非抛错。
+ * @description 用于在用户主目录等含 Windows 联接点（如 `Application Data`）的路径上扫描时避免整 CLI 启动失败。
+ */
+export const readdirSyncSafe = (root: string): string[] => {
+  try {
+    return fs.readdirSync(root);
+  } catch (err) {
+    if (isFsSkippedError(err)) return [];
+    throw err;
+  }
+};
+
+/**
+ * 同步读取 YAML 并解析；读盘或解析失败且为可跳过错误时返回 `null`。
+ * @typeParam T - 期望的结构类型
+ * @param fn - YAML 文件路径
+ * @returns 解析结果，或 `null`
+ */
+export const readYamlSyncSafe = <T>(fn: string): T | null => {
+  try {
+    const data = readfileSyncSafe(fn);
+    return yaml.load(data) as T;
+  } catch (err) {
+    if (isFsSkippedError(err)) return null;
+    throw err;
+  }
+};
+
+/**
+ * 同步 `lstat`；遇 {@link isFsSkippedError} 时返回 `null`。
+ */
+export const lstatSyncSafe = (ph: string): fs.Stats | null => {
+  try {
+    return fs.lstatSync(ph);
+  } catch (err) {
+    if (isFsSkippedError(err)) return null;
+    throw err;
+  }
+};
+
+/**
+ * 安全解析 JSON 字符串；解析失败时不抛错。
+ * @typeParam T - 期望的结果类型
+ * @param value - 待解析文本
+ * @param defaultValue - 解析失败时返回的值，默认 `null`
+ * @returns 解析结果，或 `defaultValue`
+ * @example
+ * ```ts
+ * import { jsonParse } from '@jshow/cli';
+ *
+ * const data = jsonParse<{ ok: boolean }>('{"ok":true}', { ok: false });
+ * ```
+ */
+export const jsonParse = <T>(
+  value: string,
+  defaultValue: T | null = null
+): T | null => {
+  try {
+    return JSON.parse(value as string);
+  } catch {
+    return defaultValue;
+  }
+};
+
+/**
+ * 安全序列化为 JSON 字符串；循环引用等不可序列化时返回空字符串。
+ * @param value - 可 JSON 序列化的值
+ * @returns JSON 文本，失败时为 `''`
+ * @example
+ * ```ts
+ * import { jsonStringify } from '@jshow/cli';
+ *
+ * jsonStringify({ a: 1 }); // '{"a":1}'
+ * ```
+ */
+export const jsonStringify = (value: unknown): string => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+};
+
 /**
  * 同步判断路径是否存在。
  * @param ph - 文件或目录路径
@@ -89,11 +204,12 @@ export const eachDirSync = (
   callback: (name: string, ph: string, stat: fs.Stats) => boolean | void,
   ignores: Array<'link' | 'dir' | 'file'> = ['link']
 ) => {
-  const list = fs.readdirSync(root);
+  const list = readdirSyncSafe(root);
 
   for (const item of list) {
     const ph = path.join(root, item);
-    const stat = statSync(ph);
+    const stat = lstatSyncSafe(ph) ?? statSync(ph);
+    if (!stat || stat.isSymbolicLink()) continue;
     if (!stat) continue;
 
     if (ignores.includes('dir')) {
@@ -222,8 +338,10 @@ export const writeFileSync = (
 export const readJsonSync = <T>(ph: string): T | null => {
   if (!existsSync(ph)) return null;
 
-  const data = fs.readFileSync(ph);
-  return JSON.parse(data.toString('utf-8')) as T;
+  const data = readfileSyncSafe(ph);
+  if (!data || !data.startsWith('{') || !data.endsWith('}')) return null;
+
+  return JSON.parse(data) as T;
 };
 
 /**
@@ -239,48 +357,47 @@ export const readJsonSync = <T>(ph: string): T | null => {
  * ```
  */
 export const writeJsonSync = <T>(ph: string, data: T): void => {
-  fs.writeFileSync(ph, JSON.stringify(data, null, 2));
+  const text = JSON.stringify(data, null, 2);
+  writeFileSync(ph, text);
 };
 
 /**
  * {@link execSync} 的选项类型。
- * @description 在 Node 的 `cp.execSync` 基础上补充了 `verbose/silent` 以控制输出策略。
+ * @description 在 Node 的 `cp.execSync` 基础上补充了 `verbose` 以控制输出策略。
  */
 export interface ExecSyncOptions extends Pick<
   cp.ExecSyncOptions,
   'cwd' | 'env' | 'stdio' | 'timeout' | 'encoding'
 > {
-  verbose?: boolean | undefined;
-  silent?: boolean | undefined;
+  verbose?: boolean;
 }
 
 /**
  * 同步执行 shell 命令，返回去除首尾空白的 stdout 字符串。
  * @param command - 要执行的命令行
- * @param options - 可选 `cwd`、`env`、`timeout`、`encoding`
- * @returns stdout（trim 后）；`silent` 时返回空字符串
+ * @param options - 可选 `cwd`、`env`、`timeout`、`encoding`；`verbose` 将输出接到当前终端
+ * @returns stdout（trim 后）；无输出时为 `''`
  * @example
  * ```ts
  * import { execSync } from '@jshow/cli';
  *
  * const branch = execSync('git rev-parse --abbrev-ref HEAD');
  * execSync('pnpm -v', { cwd: './packages/a', verbose: true });
+ * const json = execSync('pnpm info --json lodash');
  * ```
  */
 export const execSync = (
   command: string,
-  { verbose = false, silent = false, ...options }: ExecSyncOptions = {}
+  { verbose = false, ...options }: ExecSyncOptions = {}
 ) => {
   const opts: cp.ExecSyncOptions = {
     encoding: 'utf-8',
     ...options
   };
 
-  // 默认需要读取 stdout（很多工具函数依赖返回值）；verbose 时继承子进程 stdio
+  // 默认 pipe 以读取 stdout；verbose 时继承终端（返回值通常不可用）
   if (opts.stdio == null) {
-    if (silent) opts.stdio = 'ignore';
-    else if (verbose) opts.stdio = 'inherit';
-    else opts.stdio = 'pipe';
+    opts.stdio = verbose ? 'inherit' : 'pipe';
   }
 
   const stdout = cp.execSync(command, opts);
@@ -393,9 +510,9 @@ export const isIgnoreDir = (dir: string): boolean => {
 
 /**
  * 读取 `package.json` 并写入扫描列表；缺少 `name` 则跳过。
- * @param packages - 结果聚合数组（就地修改）
+ * @param packages - 结果聚合数组（就地 `push`）
  * @param fn - `package.json` 绝对或相对路径
- * @returns 成功解析时返回 `PackageInfo`，否则 `null`
+ * @returns 成功解析的 `PackageInfo`，缺少 `name` 时为 `null`
  * @internal
  */
 const fillPackage = (packages: PackageInfo[], fn: string) => {
@@ -441,6 +558,7 @@ export const getWorkspacePackages = (
       const fn = path.join(dir, PACKAGE_JSON_FILE);
 
       if (!existsSync(fn)) {
+        // 无 manifest 的目录才继续向下扫，避免把 `packages/foo` 内的嵌套仓重复计入
         if (!isIgnoreDir(name) && level < max) {
           getWorkspacePackages(dir, max, level + 1, packages);
         }
@@ -492,6 +610,7 @@ export const getGroupPackages = (
     const group = pkg as PackageGroup;
     group.children = [];
 
+    // `private: true` 的根视为 monorepo 聚合点，子包列表仅在其目录下展开
     if (pkg.manifest.private) {
       group.children = getWorkspacePackages(root);
     }

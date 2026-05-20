@@ -13,7 +13,7 @@ import { BasePlugin, type CommandContext } from '@jshow/cli';
  * ```
  */
 export default class TimerPlugin extends BasePlugin {
-  static name = 'timer';
+  static key = 'timer';
   static force = false;
 
   /**

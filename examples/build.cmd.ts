@@ -29,7 +29,7 @@ type BuildOptions = CommandOptionsType & {
  * ```
  */
 export default class BuildCommand extends BaseCommand<BuildOptions> {
-  static name = 'build';
+  static key = 'build';
   static force = false;
 
   /**

@@ -2,6 +2,11 @@
  * @fileoverview 字符串与 {@link RegExp} 互转辅助
  */
 
+/**
+ * 字面量尾部 flags 段允许出现的 ECMAScript 正则标志。
+ * @description 非法 flags 时 {@link toRegExp} 回退为整段按源码 + `defaultFlags` 解析。
+ * @internal
+ */
 const VALID_REGEXP_FLAGS = /^[gimsuy]*$/;
 
 /**
@@ -34,6 +39,7 @@ export const toRegExp = (source: string, defaultFlags = ''): RegExp => {
     const c = s[i];
 
     if (c === '\\' && i + 1 < s.length) {
+      // 字面量解析需保留转义序列，不能把 `\/` 误当作结束分隔符
       pattern += c + s[i + 1];
       i += 2;
       continue;
@@ -42,6 +48,7 @@ export const toRegExp = (source: string, defaultFlags = ''): RegExp => {
     if (c === '/') {
       const flags = s.slice(i + 1);
       if (!VALID_REGEXP_FLAGS.test(flags)) {
+        // flags 非法时整段回退为普通源码，避免 `new RegExp` 抛 SyntaxError
         return new RegExp(s, defaultFlags);
       }
 
@@ -66,10 +73,11 @@ export const toRegExp = (source: string, defaultFlags = ''): RegExp => {
  * const [a, b] = toPatterns('^pkg-,/\\.test\\./i');
  * ```
  */
-export const toPatterns = (source: string) => {
-  return source
+export const toPatterns = (source?: string) => {
+  return (source ?? '')
     .split(',')
     .map(o => {
+      // 允许用户输入 `"a,b, c"` 这类带空格的逗号分隔列表
       const v = o && o.trim();
       return v ? toRegExp(v) : null;
     })

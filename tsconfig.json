@@ -1,16 +1,15 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "eslint-config-jshow/tsconfig.base.json",
   "include": [
-    "src"
+    "src",
+    "./global.d.ts"
   ],
   "exclude": [
-    "dist",
-    "test"
+    "dist"
   ],
   "compilerOptions": {
     "baseUrl": ".",
     "outDir": "./dist",
-    "declaration": true,
     "sourceMap": false
   }
 }

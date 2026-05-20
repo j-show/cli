@@ -13,7 +13,7 @@ import { BasePlugin, type CommandContext } from '@jshow/cli';
  * ```
  */
 export default class LoggerPlugin extends BasePlugin {
-  static name = 'logger';
+  static key = 'logger';
   static force = false;
 
   /**
@@ -29,7 +29,7 @@ export default class LoggerPlugin extends BasePlugin {
    * @param context - 命令上下文
    * @returns void
    */
-  public beforeExecute(context: CommandContext): void {
+  public async beforeExecute(context: CommandContext): Promise<void> {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [Logger] 开始执行命令: ${context.name}`);
     console.log(
@@ -43,7 +43,7 @@ export default class LoggerPlugin extends BasePlugin {
    * @param context - 命令上下文
    * @returns void
    */
-  public afterExecute(context: CommandContext): void {
+  public async afterExecute(context: CommandContext): Promise<void> {
     const timestamp = new Date().toISOString();
     const duration = Date.now() - context.startTime;
     console.log(`[${timestamp}] [Logger] 命令执行完成: ${context.name}`);

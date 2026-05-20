@@ -7,9 +7,14 @@ import { type CommandClassType } from '../../command';
 
 import { BackupCommand } from './backup.cmd';
 import { ReleaseCommand } from './release.cmd';
+import { UpgradeCommand } from './upgrade.cmd';
 
-/** 启动时由 `initBuiltIn` 注册的命令类 */
+/**
+ * 随 `initBuiltIn` 注册到 `CommandProgram` 的内置命令类列表。
+ * @description 新增内置命令时在此追加并在 README 内置命令一节同步说明。
+ */
 export const BUILT_IN_COMMANDS: CommandClassType[] = [
   BackupCommand,
-  ReleaseCommand
+  ReleaseCommand,
+  UpgradeCommand
 ];

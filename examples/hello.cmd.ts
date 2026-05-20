@@ -14,7 +14,7 @@ import { BaseCommand, type CommandContext } from '@jshow/cli';
  * ```
  */
 export default class HelloCommand extends BaseCommand {
-  static name = 'hello';
+  static key = 'hello';
   static force = false;
 
   /**
@@ -37,7 +37,7 @@ export default class HelloCommand extends BaseCommand {
    * @param context - 命令上下文
    * @returns void
    */
-  public beforeExecute(context: CommandContext): void {
+  public async beforeExecute(context: CommandContext): Promise<void> {
     console.log('准备执行 hello 命令...');
   }
 
@@ -45,7 +45,7 @@ export default class HelloCommand extends BaseCommand {
    * 命令主体逻辑（示例）。
    * @returns void
    */
-  public execute(): void {
+  public async execute(context: CommandContext): Promise<void> {
     console.log('Hello, World!');
   }
 
@@ -54,7 +54,7 @@ export default class HelloCommand extends BaseCommand {
    * @param context - 命令上下文
    * @returns void
    */
-  public afterExecute(context: CommandContext): void {
+  public async afterExecute(context: CommandContext): Promise<void> {
     const duration = Date.now() - context.startTime;
     console.log(`命令执行完成，耗时: ${duration}ms`);
   }

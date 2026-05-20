@@ -15,26 +15,109 @@ import {
 } from '../../command';
 import { logger as loggerCli } from '../../logger';
 import {
+  cpSync,
   eachDirSync,
-  execSync,
   existsSync,
   getGroupPackages,
+  isIgnoreDir,
   mkdirSync,
   pullCurrentBranch,
-  toPatterns
+  toPatterns,
+  type PackageGroup,
+  type PackageInfo
 } from '../../utils';
 
 const logger = loggerCli.fork({ namespace: 'backup' });
 
+/** 无 `package.json` 时扫描 `.git` 仓库的最大递归深度 */
+const GIT_SCAN_MAX_DEPTH = 3;
+
+/** Git 元数据目录名，用于判断目录是否为仓库根。 */
+const GIT_DIR = '.git';
+
 /**
- * 在根目录下解析工作区包，并按包名白名单过滤。
- * @param root - 扫描根目录（通常为输入路径参数）
- * @param filterPatterns - 非空时仅保留这些 `package.json` 的 `name` 符合正则表达式的包
- * @returns 过滤后的包信息列表
+ * 将 Git 仓库根目录转为备份目标条目。
  * @internal
  */
-const getInputPackages = (root: string, filterPatterns: RegExp[]) => {
-  let packages = getGroupPackages(root);
+const toGitPackageInfo = (dir: string): PackageInfo => {
+  const name = path.basename(dir);
+  return {
+    dir,
+    name,
+    manifest: { name, version: '0.0.0' }
+  };
+};
+
+/**
+ * 自 `root` 起递归查找含 `.git` 的目录，每个仓库根视为一个工作区包。
+ * @description 命中 `.git` 后不再向下扫描，避免把子模块或嵌套仓重复计入。
+ * @internal
+ */
+const discoverGitPackages = (
+  root: string,
+  max = GIT_SCAN_MAX_DEPTH,
+  level = 0,
+  packages: PackageInfo[] = []
+): PackageInfo[] => {
+  if (!existsSync(root)) return packages;
+
+  if (existsSync(path.join(root, GIT_DIR))) {
+    packages.push(toGitPackageInfo(root));
+    return packages;
+  }
+
+  if (level >= max) return packages;
+
+  eachDirSync(
+    root,
+    (name, dir) => {
+      if (isIgnoreDir(name)) return;
+      discoverGitPackages(dir, max, level + 1, packages);
+    },
+    ['file']
+  );
+
+  return packages;
+};
+
+/**
+ * 将 `getGroupPackages` 结果展开为待备份的包目录列表。
+ * @description monorepo 根（含 `children`）时备份各子包；无 manifest 时回退为 `.git` 仓库扫描。
+ * @internal
+ */
+const resolveBackupTargets = (
+  inputRoot: string,
+  groups: PackageGroup[]
+): PackageInfo[] => {
+  const targets: PackageInfo[] = [];
+
+  for (const group of groups) {
+    if (group.children.length > 0) {
+      targets.push(...group.children);
+    } else {
+      targets.push(group);
+    }
+  }
+
+  if (targets.length > 0) return targets;
+
+  return discoverGitPackages(inputRoot);
+};
+
+/**
+ * 解析备份目标并按 `-f` 过滤包名。
+ * @param root - 扫描根目录（用于无 manifest 时的 `.git` 回退扫描）
+ * @param groups - `getGroupPackages` 结果
+ * @param filterPatterns - `toPatterns` 解析后的正则列表；为空则不过滤
+ * @returns 待备份的 `PackageInfo` 列表
+ * @internal
+ */
+const getInputPackages = (
+  root: string,
+  groups: PackageGroup[],
+  filterPatterns: RegExp[]
+) => {
+  let packages = resolveBackupTargets(root, groups);
 
   if (filterPatterns.length > 0) {
     packages = packages.filter(o => filterPatterns.some(p => p.test(o.name)));
@@ -51,13 +134,16 @@ const getInputPackages = (root: string, filterPatterns: RegExp[]) => {
  * @internal
  */
 const fetchPackage = async (log: Logger, pkgRoot: string) => {
-  if (!existsSync(path.join(pkgRoot, '.git'))) return;
+  if (!existsSync(path.join(pkgRoot, GIT_DIR))) return;
 
   log.write(`Fetching path: ${path.relative(process.cwd(), pkgRoot)}`);
 
-  pullCurrentBranch(true, pkgRoot, log.checkLevel('debug'));
-
-  log.write(`Fetched successfully\n`);
+  try {
+    pullCurrentBranch(true, pkgRoot, log.checkLevel('debug'));
+    log.write(`Fetched successfully\n`);
+  } catch {
+    log.write(`Failed to fetch\n`);
+  }
 };
 
 /**
@@ -84,11 +170,12 @@ const copyPackage = async (
   mkdirSync(outputDir);
 
   eachDirSync(pkgRoot, name => {
+    // 只复制包根下一级条目，避免把整棵子树（含 node_modules）递归进备份目录
     if (filterNames.includes(name)) return;
 
-    const dest = path.relative(pkgRoot, path.join(outputDir, name));
-
-    execSync(`cp -Rf ./${name} ${dest}`, { cwd: pkgRoot });
+    const src = path.join(pkgRoot, name);
+    const dest = path.join(outputDir, name);
+    cpSync(src, dest);
   });
 
   log.write(`Copied successfully\n`);
@@ -106,7 +193,7 @@ interface BackupOptions extends CommandOptionsType {
 }
 
 /**
- * 工作区多包备份流程：先 pull，再调用占位 `backupPackage`。
+ * 工作区多包备份：对每个包可选 `git pull`，再将目录内容复制到输出路径（见 {@link copyPackage}）。
  * @example
  * ```ts
  * // 该类由 CLI 自动发现并注册：文件名需以 `.cmd.ts` 结尾，且默认导出/或导出类被加载到运行时。
@@ -117,7 +204,7 @@ interface BackupOptions extends CommandOptionsType {
  * ```
  */
 export class BackupCommand extends BaseCommand<BackupOptions> {
-  static name = 'backup';
+  static key = 'backup';
 
   public get args(): CommandArgs {
     return {
@@ -165,21 +252,38 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
     inputRoot = path.resolve(inputRoot);
     outputRoot = path.resolve(outputRoot);
 
+    const cwd = process.cwd();
     logger.info('Start', {
-      cwd: process.cwd(),
-      input: path.relative(process.cwd(), inputRoot),
-      output: path.relative(process.cwd(), outputRoot)
+      cwd,
+      input: path.relative(cwd, inputRoot),
+      output: path.relative(cwd, outputRoot)
     });
     logger.empty();
 
     const patterns = toPatterns(filter);
-    const packages = getInputPackages(inputRoot, patterns);
+    const groups = getGroupPackages(inputRoot);
+    const packages = getInputPackages(inputRoot, groups, patterns);
+
+    if (packages.length < 1) {
+      logger.error('No packages found to backup', {
+        input: path.relative(cwd, inputRoot),
+        filter: filter || void 0
+      });
+      process.exit(1);
+    }
+
+    if (groups.length < 1) {
+      logger.warn(
+        `No package.json workspaces under "${path.relative(cwd, inputRoot)}"; backing up ${packages.length} git repository(ies).`
+      );
+    }
 
     const filters = ['node_modules'];
     if (clean) filters.push('.git');
 
     for (const item of packages) {
       await logger.scope({ namespace: item.name }, async log => {
+        // 按包隔离 pull/copy 日志，单包失败不影响后续包
         await fetchPackage(log, item.dir);
 
         await copyPackage(log, item.dir, outputRoot, filters);

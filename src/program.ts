@@ -3,9 +3,11 @@
  * @description 负责命令的注册、管理和运行
  */
 
-import { Command } from 'commander';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { version } from '../package.json';
+import { Command } from 'commander';
 
 import { BUILT_IN_COMMANDS, BUILT_IN_PLUGINS } from './built-in';
 import { isCommand, type BaseCommand, type CommandClassType } from './command';
@@ -17,15 +19,33 @@ import { isPlugin, type BasePlugin, type PluginClassType } from './plugin';
  */
 const CLI_PROGRAM_NAME = 'jshow';
 
+let cliPackageVersion: string | undefined;
+
 /**
- * 插件类型接口
- * @description 存储已注册插件的信息
+ * 从仓库根 `package.json` 读取版本（开发与 `dist` 下均解析为上一级目录）。
+ * @returns 本包 `version` 字段字符串
+ * @internal
+ */
+function readCliPackageVersion(): string {
+  if (cliPackageVersion != null) return cliPackageVersion;
+  // Rolldown 在 `.cjs` 产物中会将 `import.meta.url` 改写为基于 `__filename` 的 URL。
+  // @ts-expect-error TS1470 — 同一份 TS 同时产出 CJS/ESM，类型检查对 CJS 分支报错，运行时两格式均正确。
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const pkgPath = path.join(dir, '..', 'package.json');
+  const raw = fs.readFileSync(pkgPath, 'utf-8');
+  cliPackageVersion = (JSON.parse(raw) as { version: string }).version;
+  return cliPackageVersion;
+}
+
+/**
+ * {@link CommandProgram.install} 在内存中记录的插件条目。
+ * @internal
  */
 interface PluginType {
   /**
-   * 插件名称
+   * 插件注册键（来自类的 `key` 或 `name`）
    */
-  name: string;
+  key: string;
   /**
    * 插件优先级（数字越小优先级越高）
    */
@@ -41,14 +61,14 @@ interface PluginType {
 }
 
 /**
- * 命令类型接口
- * @description 存储已注册命令的信息
+ * {@link CommandProgram.use} 在内存中记录的命令条目。
+ * @internal
  */
 interface CommandType {
   /**
-   * 命令名称
+   * 命令注册键（来自类的 `key` 或 `name`）
    */
-  name: string;
+  key: string;
   /**
    * 命令类构造函数
    */
@@ -66,6 +86,7 @@ interface CommandType {
 
 /**
  * 创建根 `Command` 实例（名称恒为 {@link CLI_PROGRAM_NAME}）。
+ * @returns 新的 Commander 根程序
  * @internal
  */
 const buildProgram = (): Command => new Command(CLI_PROGRAM_NAME);
@@ -100,6 +121,7 @@ const DEFAULT_GROUP = 'default';
  * @description
  * 为命令创建 Commander 子命令并实例化命令类。
  * 同时设置命令的分组信息，如果命令未指定分组则使用默认分组。
+ * @returns void
  * @internal
  */
 const setupCommand = (
@@ -107,7 +129,7 @@ const setupCommand = (
   plugins: BasePlugin[],
   item: CommandType
 ): void => {
-  const command = program.command(item.name);
+  const command = program.command(item.key);
   const instance = new item.command(command, plugins);
 
   // 设置命令分组信息
@@ -152,6 +174,7 @@ const enhanceHelp = (program: Command): void => {
   const originalHelpInformation = program.helpInformation.bind(program);
 
   program.helpInformation = function () {
+    // 在 Commander 默认帮助后追加按 group 聚合的子命令表
     let help = originalHelpInformation();
 
     // 按分组组织命令
@@ -160,7 +183,7 @@ const enhanceHelp = (program: Command): void => {
     if (grouped.size > 0) {
       help += '\n\nCommand Groups:';
       const sortedGroups = Array.from(grouped.entries()).sort((a, b) => {
-        // DEFAULT_GROUP 组放在最后
+        // 未分组命令沉底，其余按组名字母序，便于在帮助里快速定位
         if (a[0] === DEFAULT_GROUP) return 1;
         if (b[0] === DEFAULT_GROUP) return -1;
         return a[0].localeCompare(b[0]);
@@ -175,7 +198,7 @@ const enhanceHelp = (program: Command): void => {
             ? ` (Aliases: ${instanceArgs?.aliases.join(', ')})`
             : '';
 
-          help += `    ${cmd.name.padEnd(20)} ${description}${aliases}\n`;
+          help += `    ${cmd.key.padEnd(20)} ${description}${aliases}\n`;
         }
       }
     }
@@ -187,7 +210,7 @@ const enhanceHelp = (program: Command): void => {
 /**
  * 将内置插件与内置命令注册到传入的 `CommandProgram` 上。
  * @param program - 一般为 `CommandProgram` 类（静态方法挂载在同一对象上）
- * @returns 可链式调用的程序类，便于 `initBuiltIn(CommandProgram).run()`
+ * @returns 传入的 `program`（`typeof CommandProgram`），便于链式 `.run()`
  * @example
  * ```ts
  * import { CommandProgram, initBuiltIn } from '@jshow/cli';
@@ -199,6 +222,7 @@ export const initBuiltIn = (
   program: typeof CommandProgram
 ): typeof CommandProgram => {
   BUILT_IN_PLUGINS.forEach(plugin => {
+    // 构建产物若混入非插件导出，守卫可避免 install 抛错导致 CLI 无法启动
     if (!isPlugin(plugin)) return;
     program.install(plugin, plugin.force);
   });
@@ -230,7 +254,7 @@ export class CommandProgram {
    * @static
    */
   static get version(): string {
-    return version;
+    return readCliPackageVersion();
   }
 
   /**
@@ -253,7 +277,7 @@ export class CommandProgram {
    * 安装一个插件
    * @param plugin - 要安装的插件类（必须继承自 BasePlugin）
    * @param force - 如果插件已存在，是否强制覆盖（默认：false）
-   * @returns CommandProgram 实例（支持链式调用）
+   * @returns `CommandProgram`（支持链式调用）
    * @throws {Error} 如果插件已存在且 force 为 false
    * @static
    * @description
@@ -274,16 +298,16 @@ export class CommandProgram {
    */
   static install(plugin: PluginClassType, force?: boolean) {
     const plugins = programShape.plugins;
-    const name = plugin.name;
+    const key = (plugin as unknown as { key: string }).key || plugin.name;
 
-    if (plugins.some(p => p.name === name) && !force) {
-      throw new Error(`Plugin '${name}' already exists.`);
+    if (plugins.some(p => p.key === key) && !force) {
+      throw new Error(`Plugin '${key}' already exists.`);
     }
 
     const instance = new plugin();
 
     plugins.push({
-      name,
+      key,
       plugin,
       priority: instance.priority,
       instance
@@ -298,7 +322,7 @@ export class CommandProgram {
    * 注册一个命令类
    * @param command - 要注册的命令类（必须继承自 BaseCommand）
    * @param force - 如果命令已存在，是否强制覆盖（默认：false）
-   * @returns CommandProgram 实例（支持链式调用）
+   * @returns `CommandProgram`（支持链式调用）
    * @throws {Error} 如果命令已存在且 force 为 false
    * @static
    * @example
@@ -317,11 +341,11 @@ export class CommandProgram {
    */
   static use(command: CommandClassType, force?: boolean) {
     const commands = programShape.commands;
-    const name = command.name;
+    const key = (command as unknown as { key: string }).key || command.name;
 
     // 检查命令是否已存在
-    if (commands.has(name) && !force) {
-      throw new Error(`Command '${name}' already exists.`);
+    if (commands.has(key) && !force) {
+      throw new Error(`Command '${key}' already exists.`);
     }
 
     // 获取命令分组信息（需要临时创建实例来获取 args）
@@ -329,7 +353,7 @@ export class CommandProgram {
     // 所以分组信息会在 setupCommand 时设置
 
     // 注册命令（延迟实例化）
-    commands.set(name, { name, command });
+    commands.set(key, { key, command });
 
     return this;
   }
@@ -362,6 +386,7 @@ export class CommandProgram {
    * 1. 为所有已注册但未实例化的命令创建实例
    * 2. 设置增强的帮助信息
    * 3. 解析命令行参数并执行相应的命令
+   * @returns 解析与命令执行完成时 settled 的 Promise
    * @static
    * @example
    * ```typescript

@@ -1,14 +1,12 @@
-/* eslint-disable no-void */
 /**
  * @fileoverview `release` 内置命令
- * @description 交互选择待发包、校验工作区干净程度；版本 bump 与发布逻辑为占位实现。
+ * @description 交互选择待发布包、可选校验 Git 干净程度；写入新版本、`pnpm install`、提交并按需 `git push`（多仓 / monorepo 分支流程见实现）。
  */
 
-import os from 'node:os';
 import path from 'node:path';
 
 import { type Logger } from '@jshow/logger';
-import inquirer from 'inquirer';
+
 import semver, { type ReleaseType } from 'semver';
 
 import {
@@ -20,9 +18,10 @@ import {
 import { logger as loggerCli } from '../../logger';
 import {
   addGit,
-  commitGitByFile,
+  commitGit,
   execSync,
   getGroupPackages,
+  getInquirer,
   getUnCommittedFiles,
   installPnpm,
   PACKAGE_DEPENDENCY_KEYS,
@@ -30,13 +29,12 @@ import {
   type PackageGroup,
   type PackageInfo,
   type PackageJson,
-  PNPM_BUILT_IN_VERSION,
+  PNPM_BUILT_IN_WORKSPACE,
   pushGit,
   readJsonSync,
   resetGit,
   separateGroupPackages,
   statSync,
-  writeFileSync,
   writeJsonSync
 } from '../../utils';
 
@@ -98,6 +96,9 @@ const checkPackageUncommittedForMonorepo = async (log: Logger, cwd: string) => {
 
 /**
  * 针对「多仓库并列」场景检查每个待发包目录；不干净时弹出交互（跳过/重置/忽略/中止）。
+ * @param log - 作用域日志
+ * @param packages - 待检查包列表（可能被就地修改）
+ * @returns 可继续发版为 `true`；用户选择 abort 为 `false`
  * @description `packages` 可能被就地剔除（skip）或对部分目录执行 {@link resetGit}。
  * @internal
  */
@@ -117,6 +118,7 @@ const checkPackageUncommittedForMulti = async (
     indexs.push(i);
   }
 
+  const inquirer = await getInquirer();
   const { select } = await inquirer.prompt<{ select: string }>({
     type: 'rawlist',
     name: 'select',
@@ -140,6 +142,7 @@ const checkPackageUncommittedForMulti = async (
   switch (select) {
     case 'skip':
     default: {
+      // 就地替换数组，调用方持有的 `packages` 引用仍有效
       const list = packages.filter((_, i) => !indexs.includes(i));
       packages.splice(0, packages.length, ...list);
       break;
@@ -169,6 +172,7 @@ const filterReleasePackages = async (list: PackageInfo[]) => {
   const packages = list.filter(v => !v.manifest.private);
   if (packages.length < 1) return [];
 
+  const inquirer = await getInquirer();
   const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
     type: 'checkbox',
     name: 'selecteds',
@@ -204,6 +208,7 @@ const askForNextVersion = async (
     if (nextVersion) return nextVersion;
   }
 
+  const inquirer = await getInquirer();
   nextVersion = (
     await inquirer.prompt<{ version: string }>({
       type: 'rawlist',
@@ -211,6 +216,7 @@ const askForNextVersion = async (
       message: `Select release type for ${packageName}`,
       choices: releaseTypes
         .map(type => {
+          // 列表展示 bump 预览，便于用户对比当前版与候选下一版
           const value = semver.inc(currVersion, type, preReleaseIdentifier);
 
           return {
@@ -232,7 +238,7 @@ const askForNextVersion = async (
 
   if (nextVersion === 'custom') {
     nextVersion = (
-      await inquirer.prompt({
+      await inquirer.prompt<{ version: string }>({
         type: 'input',
         name: 'version',
         message: `Enter the custom version for ${packageName}`,
@@ -270,7 +276,8 @@ interface VersionInfo {
 }
 
 /**
- * 计算每个包的新版本号（当前返回空对象，占位）。
+ * 交互或按 `releaseType` 预选，为每个包计算下一版本号。
+ * @param log - 作用域日志
  * @param packages - 待发布的包列表
  * @param releaseType - 预选 release type
  * @returns 包名到版本信息映射；用户取消时返回 `null`
@@ -330,6 +337,7 @@ const execUpdateVersionPost = (json: PackageJson, dir: string): void => {
 const updateVersions = async (versions: Record<string, VersionInfo>) => {
   await Promise.all(
     Object.values(versions).map(async pkg => {
+      // 各包 manifest 独立写回；依赖字段里若引用同批 bump 的包名则同步到新版本
       const fn = path.join(pkg.dir, PACKAGE_JSON_FILE);
 
       const json = readJsonSync<PackageJson>(fn);
@@ -342,7 +350,7 @@ const updateVersions = async (versions: Record<string, VersionInfo>) => {
 
         for (const key of Object.keys(items)) {
           // skip workspace:* / workspace:^...
-          if (items[key].startsWith(PNPM_BUILT_IN_VERSION)) continue;
+          if (items[key].startsWith(PNPM_BUILT_IN_WORKSPACE)) continue;
 
           if (versions[key]) {
             items[key] = versions[key].new;
@@ -376,6 +384,7 @@ const releasePackageForMonrepo = async (
   push: boolean
 ) => {
   if (!force) {
+    const inquirer = await getInquirer();
     const yes = (
       await inquirer.prompt({
         type: 'confirm',
@@ -408,15 +417,14 @@ const releasePackageForMonrepo = async (
   log.step('Committing...');
   addGit(cwd);
 
-  const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
-  writeFileSync(
-    commitMsgFile,
-    'chore: release packages',
-    '',
-    Object.entries(versions).map(([name, ver]) => `- ${name} ${ver.new}`)
+  commitGit(
+    [
+      'chore: release packages',
+      '',
+      ...Object.entries(versions).map(([name, ver]) => `- ${name} ${ver.new}`)
+    ],
+    cwd
   );
-
-  commitGitByFile(commitMsgFile, cwd);
 
   if (push) {
     log.step('Pushing...');
@@ -426,6 +434,11 @@ const releasePackageForMonrepo = async (
 
 /**
  * 多独立包场景：可对选中包逐一安装、提交并推送。
+ * @param log - 作用域日志
+ * @param data - 包名到新版本映射（含目录路径）
+ * @param force - 为真时跳过二次勾选，发布全部条目
+ * @param push - 是否在每包提交后 `git push`
+ * @returns Promise<void>
  * @internal
  */
 const releasePackageForMulti = async (
@@ -441,6 +454,7 @@ const releasePackageForMulti = async (
       versions[key] = data[key];
     }
   } else {
+    const inquirer = await getInquirer();
     const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
       type: 'checkbox',
       name: 'selecteds',
@@ -467,6 +481,7 @@ const releasePackageForMulti = async (
   log.empty();
   for (const [name, ver] of Object.entries(versions)) {
     await log.scope({ namespace: name }, async clog => {
+      // 多仓场景每个包在各自 Git 根下 install/commit/push
       const cwd = ver.dir;
 
       clog.step('Install dependencies...');
@@ -480,10 +495,7 @@ const releasePackageForMulti = async (
       clog.step('Committing...');
       addGit(cwd);
 
-      const commitMsgFile = path.join(os.tmpdir(), 'release_commit_msg');
-      writeFileSync(commitMsgFile, `chore: release package ${ver.new}`);
-
-      commitGitByFile(commitMsgFile, cwd);
+      commitGit([`chore: release package ${ver.new}`], cwd);
 
       if (push) {
         clog.step('Pushing...');
@@ -495,6 +507,10 @@ const releasePackageForMulti = async (
 
 /**
  * 处理「多个并列独立包」发版入口：校验、过滤交互、计算版本并调用 {@link releasePackageForMulti}。
+ * @param log - 作用域日志
+ * @param packages - 扫描得到的独立包列表
+ * @param options - CLI 选项（`check` / `type` / `force` / `push`）
+ * @returns 流程成功为 `true`，跳过/取消/无包为 `false`
  * @internal
  */
 const releaseMultiPackages = async (
@@ -534,6 +550,10 @@ const releaseMultiPackages = async (
 
 /**
  * 处理单个 monorepo 根（含 `children`）的发版入口。
+ * @param log - 作用域日志
+ * @param group - monorepo 根目录与子包列表
+ * @param options - CLI 选项（`check` / `type` / `force` / `push`）
+ * @returns 流程成功为 `true`，否则 `false`
  * @internal
  */
 const releaseMonrepoPackage = async (
@@ -586,8 +606,20 @@ interface ReleaseOptions extends CommandOptionsType {
   push: boolean;
 }
 
+/** `execute` 末尾 Report 表的行结构。 */
+interface ReleaseReport {
+  /** 布局类型：`multi` 或 `mono` */
+  type: string;
+  /** monorepo 根包名；multi 布局为 `-` */
+  name: string;
+  /** 处理的包数量（mono 为子包数） */
+  count: number;
+  /** 该段流程是否产生并成功完成升级 */
+  status: boolean;
+}
+
 /**
- * Monorepo 发包向导：可选检查 git 状态、选择包、占位 bump 与发布。
+ * 工作区发版向导：可选检查 Git 状态、选择包、`semver` bump、写回 `package.json`、`pnpm install`、提交与推送。
  * @example
  * ```ts
  * // 运行示例：
@@ -597,7 +629,7 @@ interface ReleaseOptions extends CommandOptionsType {
  * ```
  */
 export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
-  static name = 'release';
+  static key = 'release';
 
   public get args(): CommandArgs {
     return {
@@ -651,24 +683,31 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
 
     inputRoot = path.resolve(inputRoot);
 
+    const cwd = process.cwd();
     logger.info('Start', {
-      cwd: process.cwd(),
-      input: path.relative(process.cwd(), inputRoot)
+      cwd,
+      input: path.relative(cwd, inputRoot)
     });
     logger.empty();
 
     const packages = getGroupPackages(inputRoot);
     const [multiPackages, monorepoPackages] = separateGroupPackages(packages);
 
-    const reports: Array<[string, string, number, boolean]> = [];
+    const reports: ReleaseReport[] = [];
 
     if (multiPackages.length > 0) {
       logger.label(`Release multi packages: ${multiPackages.length}`);
 
       await logger.scope({ namespace: 'multi' }, async log => {
+        // 多独立仓与 monorepo 可同次执行：前者按包各自 Git 根，后者在 monorepo 根统一提交
         const status = await releaseMultiPackages(log, multiPackages, options);
 
-        reports.push(['multi', '-', multiPackages.length, status]);
+        reports.push({
+          type: 'multi',
+          name: '-',
+          count: multiPackages.length,
+          status
+        });
       });
 
       logger.label('--------------------------------');
@@ -683,7 +722,12 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
         await logger.scope({ namespace: `mrepo: ${pkg.name}` }, async log => {
           const status = await releaseMonrepoPackage(log, pkg, options);
 
-          reports.push(['mono', pkg.name, pkg.children.length, status]);
+          reports.push({
+            type: 'mono',
+            name: pkg.name,
+            count: pkg.children.length,
+            status
+          });
         });
         logger.empty();
       }
@@ -693,7 +737,7 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
     }
 
     logger.label('Report:');
-    logger.table(reports, ['type', 'name', 'count', 'status']);
+    logger.table(reports);
     logger.empty();
 
     logger.info('Completed');
