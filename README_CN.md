@@ -443,8 +443,10 @@ CLI 会自动扫描当前工作目录及其子目录，查找所有 `.cmd.ts`、
 
 ## 开发说明
 
-- **库与 CLI 分工**：`import '@jshow/cli'` 使用 `CommandProgram` / `BaseCommand` / `utils`；执行 `jshow`（或在本仓库 `pnpm start`）才会扫描 cwd。实现入口：`src/index.ts`（库）、`src/cli.ts` → `dist/cli.mjs`（CLI）。
-- **内置命令**：在 `src/built-in/commands/index.ts` 注册；新增后请同步更新本文「内置命令」一节。
+- **库与 CLI 分工**：`import '@jshow/cli'` 使用 `CommandProgram` / `BaseCommand` / `utils`；执行 `jshow`（或在本仓库 `pnpm start`）才会扫描 cwd。实现入口：`src/index.ts`（库）、`src/cli.ts` → `dist/cli.mjs`（CLI）。`src/cli.ts` 导出 `runjShow` 供测试或二次封装，**不**从包主入口再导出。
+- **命令发现**：工作区内 `.cmd` / `.plugin` 加载失败仅 `warn`，不阻断 `--help` 与内置命令（见 `loadCommand` / `loadPlugin`）。
+- **布尔选项 `invert`**：在 `CommandOption` 上对 `flagValue: false` 的开关可设 `invert: true`，框架会额外注册 `--no-<name>`（内置 `backup -c`、`release --check` / `--push` 等）；语义见 `src/command.ts` 的 `initOption`。
+- **内置命令**：在 `src/built-in/commands/index.ts` 注册；行为细节见 `docs/*.md`，摘要见本文「内置命令」。
 - **JSDoc**：`src/` 下公共与内部辅助函数均在源码旁维护文档，API 细节以 JSDoc 为准，本文不重复罗列每个符号。
 
 ---
@@ -473,6 +475,7 @@ CLI 会自动扫描当前工作目录及其子目录，查找所有 `.cmd.ts`、
 │   ├── built-in/       # initBuiltIn 注册的默认命令/插件
 │   └── utils/          # 工作区扫描、git、pnpm、fs 等
 ├── test/               # Vitest 与 fixtures（不参与包发布）
+├── docs/               # 内置命令说明（backup / release / upgrade）
 ├── examples/           # 示例 .cmd / .plugin
 ├── scripts/            # 开发辅助脚本（如 run-cli-help.mjs）
 ├── dist/               # Vite 构建输出（通常 gitignore）

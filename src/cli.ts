@@ -82,6 +82,8 @@ const BUILT_IN_COMMAND_PATH = path.normalize(
 
 /**
  * 判断路径是否位于 CLI 自带的 `built-in/commands` 目录下。
+ * @param fn - 待检查的文件或目录路径
+ * @returns 若位于内置命令目录树内则为 `true`
  * @description 避免把包内已注册的内置命令再当作用户项目文件扫描一遍。
  * @internal
  */
@@ -189,7 +191,10 @@ const loadPlugin = async (fn: string, log: typeof logger): Promise<void> => {
     // 注册插件
     CommandProgram.install(plugin, plugin.force);
   } catch (error) {
-    log.warn(`加载插件文件 "${fn}" 时出错:`, error);
+    log.warn(
+      `加载插件文件 "${fn}" 时出错`,
+      error instanceof Error ? error.message : String(error)
+    );
   }
 };
 
@@ -238,7 +243,10 @@ const loadCommand = async (fn: string, log: typeof logger): Promise<void> => {
   } catch (error) {
     // 外部工作目录里的命令文件可能依赖其自身的运行环境（依赖未装、模块格式不兼容等）。
     // 这里降级为 warn，避免单个命令文件导致整个 CLI（包括 --help）无法启动。
-    log.warn(`加载命令文件 "${fn}" 时出错:`, error);
+    log.warn(
+      `加载命令文件 "${fn}" 时出错`,
+      error instanceof Error ? error.message : String(error)
+    );
   }
 };
 
@@ -292,8 +300,9 @@ export const runjShow = async (): Promise<void> => {
   await runPromise;
 };
 
+// 作为可执行入口立即启动；失败时非零退出，避免静默成功
 void runjShow().catch((err: unknown) => {
-  // 顶层启动失败时给出可读信息并非零退出，便于 CI/脚本判断
+  // 顶层启动失败时给出可读信息并 exit(1)，便于 CI/脚本判断
   logger.error(
     '❌ 启动失败:',
     err instanceof Error ? err.message : String(err)

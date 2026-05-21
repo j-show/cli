@@ -442,9 +442,11 @@ The CLI automatically scans the current working directory and its subdirectories
 
 ## Development notes
 
-- **Library vs CLI**: import `@jshow/cli` for `CommandProgram` / `BaseCommand` / `utils`; run `jshow` (or `pnpm start` in this repo) for cwd auto-discovery. Implementation entry points: `src/index.ts` (library), `src/cli.ts` → `dist/cli.mjs` (CLI).
-- **Built-in commands**: wired in `src/built-in/commands/index.ts`; add new classes there and document them in this README.
-- **JSDoc**: public and internal helpers in `src/` are documented next to implementations—prefer reading source JSDoc over duplicating API lists here.
+- **Library vs CLI**: import `@jshow/cli` for `CommandProgram` / `BaseCommand` / `utils`; run `jshow` (or `pnpm start` in this repo) for cwd auto-discovery. Entry points: `src/index.ts` (library), `src/cli.ts` → `dist/cli.mjs` (CLI). `runjShow` is exported from `src/cli.ts` for tests/custom wrappers but **not** from the package main entry.
+- **Discovery resilience**: a broken `.cmd` / `.plugin` in the workspace logs a warning only so `--help` and built-ins still run (`loadCommand` / `loadPlugin`).
+- **Boolean `invert`**: for `flagValue: false` options, `invert: true` also registers `--no-<name>` (used by built-in `backup -c`, `release --check` / `--push`, etc.); see `initOption` in `src/command.ts`.
+- **Built-in commands**: registered in `src/built-in/commands/index.ts`; see `docs/*.md` for flow details and this README for a summary.
+- **JSDoc**: public and internal helpers in `src/` are documented next to implementations—prefer source JSDoc over duplicating API lists here.
 
 ---
 
@@ -472,6 +474,7 @@ The CLI automatically scans the current working directory and its subdirectories
 │   ├── built-in/       # Default commands/plugins wired by initBuiltIn
 │   └── utils/          # Workspace scan, git, pnpm, fs helpers
 ├── test/               # Vitest specs and fixtures (not published)
+├── docs/               # Built-in command docs (backup / release / upgrade)
 ├── examples/           # Sample .cmd / .plugin files
 ├── scripts/            # Dev helpers (e.g. run-cli-help.mjs)
 ├── dist/               # Vite build output (gitignored)

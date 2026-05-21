@@ -37,6 +37,8 @@ const GIT_DIR = '.git';
 
 /**
  * 将 Git 仓库根目录转为备份目标条目。
+ * @param dir - 仓库根绝对路径
+ * @returns 合成 `PackageInfo`（`manifest.version` 固定为 `0.0.0`）
  * @internal
  */
 const toGitPackageInfo = (dir: string): PackageInfo => {
@@ -50,6 +52,11 @@ const toGitPackageInfo = (dir: string): PackageInfo => {
 
 /**
  * 自 `root` 起递归查找含 `.git` 的目录，每个仓库根视为一个工作区包。
+ * @param root - 扫描起点
+ * @param max - 最大递归深度，默认 {@link GIT_SCAN_MAX_DEPTH}
+ * @param level - 当前深度（内部递归用）
+ * @param packages - 累积结果（内部递归用）
+ * @returns 发现的 Git 仓库列表
  * @description 命中 `.git` 后不再向下扫描，避免把子模块或嵌套仓重复计入。
  * @internal
  */
@@ -82,6 +89,9 @@ const discoverGitPackages = (
 
 /**
  * 将 `getGroupPackages` 结果展开为待备份的包目录列表。
+ * @param inputRoot - 用户传入的输入目录（无 manifest 时用于 {@link discoverGitPackages}）
+ * @param groups - `getGroupPackages` 返回值
+ * @returns 待备份的 `PackageInfo` 列表
  * @description monorepo 根（含 `children`）时备份各子包；无 manifest 时回退为 `.git` 仓库扫描。
  * @internal
  */
@@ -186,9 +196,12 @@ const copyPackage = async (
  * @internal
  */
 interface BackupOptions extends CommandOptionsType {
-  /** 是否在输出侧排除 `.git` */
+  /**
+   * 复制时是否排除源目录下的 `.git`（始终排除 `node_modules`）。
+   * @description CLI 声明 `invert: true` 且默认 `true`，对应 `-c` / `--clean`。
+   */
   clean: boolean;
-  /** 逗号分隔包名过滤模式，见 {@link toPatterns} */
+  /** 逗号分隔的**包名**过滤模式，见 {@link toPatterns}（非文件路径） */
   filter?: string;
 }
 
@@ -200,7 +213,7 @@ interface BackupOptions extends CommandOptionsType {
  *
  * // 运行示例：
  * jshow backup ./code ./code_backup
- * jshow backup ./core ./core_backup -c -f "*.test.ts"
+ * jshow backup ./core ./core_backup -c -f "@scope/pkg-a"
  * ```
  */
 export class BackupCommand extends BaseCommand<BackupOptions> {
@@ -213,7 +226,7 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
       description: 'Backup workspace packages to output directory',
       examples: [
         'jshow backup ./code ./code_backup',
-        'jshow backup ./core ./core_backup -c -f "*.test.ts"'
+        'jshow backup ./core ./core_backup -c -f "@scope/pkg-a"'
       ],
       arguments: [
         {
@@ -232,17 +245,24 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
           name: 'clean',
           abbr: 'c',
           description: 'Clean output .git directory',
-          defaultValue: true
+          defaultValue: true,
+          invert: true
         },
         {
           name: 'filter',
           abbr: 'f',
-          description: 'The filter pattern'
+          description: 'The filter pattern',
+          flagValue: true
         }
       ]
     };
   }
 
+  /**
+   * 解析输入/输出目录，拉取并复制各备份目标到输出根下以包名命名的子目录。
+   * @param context - Commander 解析后的参数与选项
+   * @returns Promise<void>；无目标时 `process.exit(1)`
+   */
   public async execute({
     args,
     options: { clean, filter = '' }

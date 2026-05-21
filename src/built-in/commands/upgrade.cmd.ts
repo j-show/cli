@@ -1,8 +1,8 @@
 /**
  * @fileoverview `upgrade` 内置命令
  * @description
- * 扫描工作区内多仓或 monorepo，汇总依赖引用关系，查询 registry 可升级版本；
- * 经交互选择后写回 `package.json`、执行 `pnpm install`，并可选择提交与推送。
+ * 扫描工作区内多仓或 monorepo，汇总依赖引用关系；
+ * 先多选依赖名再查询 registry，经字段级确认后写回 `package.json`、`pnpm install`，并可选择提交与推送。
  * `--local` 已声明但尚未接入执行逻辑。
  */
 
@@ -104,7 +104,7 @@ interface UpgradeMonorepoParams extends UpgradeParams {
   ROOT_DIR: string;
   /** 根包 `package.json` 解析结果 */
   ROOT_JSON: PackageJson;
-  /** pnpm catalog 锁定版本 */
+  /** 预留：catalog 锁定版本缓存（当前未写入） */
   CATALOG_VERSIONS: Record<string, string>;
   /** 工作区内本地包名/版本，用于 `pnpm search` 命中时标记 `workspace:*` */
   LOCAL_VERSIONS: Omit<PackageData, 'items'>[];
@@ -299,8 +299,10 @@ const filterRootVersions = (
 };
 
 /**
- * 多选待升级的依赖包名。
- * @returns 用户勾选的 `PackageData` 子集；未选任何项时返回 `[]`
+ * 多选待查询 registry 的依赖名（在 `pnpm info` 之前执行）。
+ * @param log - 作用域日志
+ * @param versions - {@link filterRootVersions} 得到的候选列表
+ * @returns 用户勾选的子集；未选任何项时返回 `[]`
  * @internal
  */
 const selectForUpgradePackages = async (
@@ -777,7 +779,7 @@ const upgradeMultiFiles = async (
 
 /**
  * 在 `cwd` 下可选执行 `git add`、多行 `commitGit` 与 `pushGit`。
- * @description `--force` 时跳过提交与推送确认；无 `git diff` 输出则直接返回；仅当 `options.push` 为真时执行 push。
+ * @description `--force` 时跳过提交与推送确认；`getUnCommittedFiles` 为空则跳过提交；仅当 `options.push` 为真时执行 push。
  * @internal
  */
 const commitChangeFiles = async (
@@ -942,7 +944,7 @@ export interface UpgradeOptions extends CommandOptionsType {
   /** 是否在 monorepo 内优先解析本地包版本（已声明，执行逻辑待接） */
   local: boolean;
   /** 逗号分隔的依赖名忽略模式，见 {@link toPatterns} */
-  ignore: string;
+  ignore?: string;
   /** 为真时跳过提交与推送的交互确认（仍会受 `push` 控制是否实际 push） */
   force: boolean;
   /** 写回并提交后是否执行 `git push`（默认 `true`） */
@@ -1001,7 +1003,8 @@ export class UpgradeCommand extends BaseCommand<UpgradeOptions> {
         {
           name: 'ignore',
           abbr: 'i',
-          description: 'The ignore packages'
+          description: 'The ignore packages',
+          flagValue: true
         },
         {
           name: 'force',
@@ -1013,12 +1016,18 @@ export class UpgradeCommand extends BaseCommand<UpgradeOptions> {
           name: 'push',
           abbr: 'p',
           description: 'Push the upgrade to the remote repository',
-          defaultValue: true
+          defaultValue: true,
+          invert: true
         }
       ]
     };
   }
 
+  /**
+   * 扫描工作区依赖升级：multi 与 monorepo 不可混跑，末尾输出 Report 表。
+   * @param context - Commander 解析后的参数与选项
+   * @returns Promise<void>；混跑布局时 `process.exit(1)`
+   */
   public async execute({
     args,
     options: { ignore, ...options }

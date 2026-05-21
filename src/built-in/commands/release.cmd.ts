@@ -596,13 +596,19 @@ const releaseMonrepoPackage = async (
  * @internal
  */
 interface ReleaseOptions extends CommandOptionsType {
-  /** 发版前是否检查工作区干净 */
+  /**
+   * 发版前是否检查工作区干净。
+   * @description CLI 默认 `true` 且 `invert: true`（对应 `-c` / `--check`）。
+   */
   check: boolean;
-  /** 预选 `semver` release type（如 `patch`） */
+  /** 预选 `semver` release type（如 `patch`）；非法值则进入交互 */
   type?: string;
-  /** 是否跳过确认提示 */
+  /** 跳过 bump 汇总确认（多仓仍会先 checkbox 选包） */
   force: boolean;
-  /** 是否在提交后 `git push` */
+  /**
+   * 是否在提交后 `git push`。
+   * @description CLI 默认 `true` 且 `invert: true`（对应 `-p` / `--push`）。
+   */
   push: boolean;
 }
 
@@ -614,7 +620,7 @@ interface ReleaseReport {
   name: string;
   /** 处理的包数量（mono 为子包数） */
   count: number;
-  /** 该段流程是否产生并成功完成升级 */
+  /** 该段流程是否成功完成发版 */
   status: boolean;
 }
 
@@ -652,12 +658,14 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
           name: 'check',
           abbr: 'c',
           description: 'Check the release',
-          defaultValue: true
+          defaultValue: true,
+          invert: true
         },
         {
           name: 'type',
           abbr: 't',
-          description: 'Release type mode'
+          description: 'Release type mode',
+          flagValue: true
         },
         {
           name: 'force',
@@ -669,12 +677,18 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
           name: 'push',
           abbr: 'p',
           description: 'Push the release to the remote repository',
-          defaultValue: true
+          defaultValue: true,
+          invert: true
         }
       ]
     };
   }
 
+  /**
+   * 扫描工作区并依次处理多独立包与 monorepo 根发版流程，末尾输出 Report 表。
+   * @param context - Commander 解析后的参数与选项
+   * @returns Promise<void>
+   */
   public async execute({
     args,
     options

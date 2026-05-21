@@ -68,6 +68,12 @@ export interface CommandOption extends CommandArgument {
    * @default false
    */
   flagValue?: boolean;
+  /**
+   * 是否为布尔开关额外注册 `--no-<name>`。
+   * @description 仅当 `flagValue` 为 `false`（布尔开关）时生效；{@link initOption} 会再挂载一条 `--no-${name}`，常与 `defaultValue: true` 搭配（如 `backup -c`、`release --check`）。
+   * @default false
+   */
+  invert?: boolean;
 }
 
 /**
@@ -205,6 +211,34 @@ const getOptionFlag = (item: CommandOption) => {
   if (item.flagValue) flags.push(getArgumentFlag(item));
 
   return flags.join(' ');
+};
+
+/**
+ * 将 {@link CommandArgument} 挂载为 Commander 位置参数。
+ * @internal
+ */
+const initArgument = (program: Command, item: CommandArgument) => {
+  program.argument(getArgumentFlag(item), item.description, item.defaultValue);
+};
+
+/**
+ * 将 {@link CommandOption} 挂载为 Commander 选项；`invert` 时为布尔开关追加 `--no-<name>`。
+ * @internal
+ */
+const initOption = (program: Command, item: CommandOption) => {
+  const flags = [getOptionFlag(item)];
+  if (item.abbr) flags.unshift(`-${item.abbr}`);
+  let flag = flags.join(', ');
+
+  program.option(flag, item.description, item.defaultValue);
+
+  if (!item.flagValue && item.invert) {
+    // 默认 true 的开关需要显式负选项，否则用户无法关闭（如 --no-push）
+    flag = getOptionFlag(item);
+    flag = flag.replace(`--${item.name}`, `--no-${item.name}`);
+
+    program.option(flag);
+  }
 };
 
 /**
@@ -359,17 +393,13 @@ export abstract class BaseCommand<
     }
 
     // 设置命令参数
-    for (const { description, defaultValue, ...item } of args.arguments ?? []) {
-      program.argument(getArgumentFlag(item), description, defaultValue);
+    for (const item of args.arguments ?? []) {
+      initArgument(program, item);
     }
 
     // 自动注册选项
-    for (const { abbr, description, defaultValue, ...item } of args.options ??
-      []) {
-      const flags = [getOptionFlag(item)];
-      if (abbr) flags.unshift(`-${abbr}`);
-
-      program.option(flags.join(', '), description, defaultValue);
+    for (const item of args.options ?? []) {
+      initOption(program, item);
     }
 
     // 添加使用示例

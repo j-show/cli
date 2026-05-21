@@ -228,11 +228,9 @@ const buildCommitFile = (name: string, msgs: string[]) => {
  * ```ts
  * import os from 'node:os';
  * import path from 'node:path';
- * import { commitGitByFile, writeFileSync } from '@jshow/cli';
+ * import { commitGit } from '@jshow/cli';
  *
- * const msg = path.join(os.tmpdir(), 'commit_msg');
- * writeFileSync(msg, 'chore: update', '', '- details');
- * commitGitByFile(msg);
+ * commitGit(['chore: update', '', '- details']);
  * ```
  */
 const commitGitByFile = (fn: string, cwd?: string) => {
