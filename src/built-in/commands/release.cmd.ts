@@ -18,11 +18,14 @@ import {
 import { logger as loggerCli } from '../../logger';
 import {
   addGit,
+  checkboxInquirer,
   commitGit,
+  confirmInquirer,
   execSync,
   getGroupPackages,
-  getInquirer,
   getUnCommittedFiles,
+  inputInquirer,
+  type InquirerChoices,
   installPnpm,
   PACKAGE_DEPENDENCY_KEYS,
   PACKAGE_JSON_FILE,
@@ -33,6 +36,7 @@ import {
   pushGit,
   readJsonSync,
   resetGit,
+  selectInquirer,
   separateGroupPackages,
   statSync,
   writeJsonSync
@@ -118,26 +122,26 @@ const checkPackageUncommittedForMulti = async (
     indexs.push(i);
   }
 
-  const inquirer = await getInquirer();
-  const { select } = await inquirer.prompt<{ select: string }>({
-    type: 'rawlist',
-    name: 'select',
-    message: [
-      'The packages are not committed, how to do?',
-      ...indexs.map(i => {
-        const pkg = packages[i];
-        return `- ${pkg.name}: ${pkg.manifest.version}`;
-      }),
-      ''
-    ].join('\n'),
-    choices: [
-      { name: 'Skip these packages', value: 'skip' },
-      { name: 'Reset the unsubmitted changes', value: 'reset' },
-      { name: 'Ignore', value: 'ignore' },
-      { name: 'Abort', value: 'abort' }
-    ],
-    default: 'skip'
-  });
+  let select = 'ignore';
+  if (indexs.length > 0) {
+    select = await selectInquirer(
+      [
+        'The packages are not committed, how to do?',
+        ...indexs.map(i => {
+          const pkg = packages[i];
+          return `- ${pkg.name}: ${pkg.manifest.version}`;
+        }),
+        ''
+      ].join('\n'),
+      [
+        { name: 'Skip these packages', value: 'skip' },
+        { name: 'Reset the unsubmitted changes', value: 'reset' },
+        { name: 'Ignore', value: 'ignore' },
+        { name: 'Abort', value: 'abort' }
+      ],
+      'skip'
+    );
+  }
 
   switch (select) {
     case 'skip':
@@ -172,15 +176,12 @@ const filterReleasePackages = async (list: PackageInfo[]) => {
   const packages = list.filter(v => !v.manifest.private);
   if (packages.length < 1) return [];
 
-  const inquirer = await getInquirer();
-  const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
-    type: 'checkbox',
-    name: 'selecteds',
-    message: 'Select the packages to release',
-    choices: packages.map(o => o.name)
-  });
+  const selects = await checkboxInquirer(
+    'Select the packages to release',
+    packages.map(o => o.name)
+  );
 
-  return packages.filter(o => selecteds.includes(o.name));
+  return packages.filter(o => selects.includes(o.name));
 };
 
 /**
@@ -208,43 +209,34 @@ const askForNextVersion = async (
     if (nextVersion) return nextVersion;
   }
 
-  const inquirer = await getInquirer();
-  nextVersion = (
-    await inquirer.prompt<{ version: string }>({
-      type: 'rawlist',
-      name: 'version',
-      message: `Select release type for ${packageName}`,
-      choices: releaseTypes
-        .map(type => {
-          // 列表展示 bump 预览，便于用户对比当前版与候选下一版
-          const value = semver.inc(currVersion, type, preReleaseIdentifier);
+  nextVersion = await selectInquirer(
+    `Select release type for ${packageName}`,
+    releaseTypes
+      .map(type => {
+        // 列表展示 bump 预览，便于用户对比当前版与候选下一版
+        const value = semver.inc(currVersion, type, preReleaseIdentifier);
 
-          return {
-            name: `${type} (${currVersion} ==> ${value})`,
-            value
-          };
-        })
-        .concat({
-          name: 'custom',
-          value: 'custom'
-        }),
-      default: semver.inc(
-        currVersion,
-        preReleaseIdentifier ? 'prepatch' : 'patch',
-        preReleaseIdentifier
-      )
-    })
-  ).version;
+        return {
+          name: `${type} (${currVersion} ==> ${value})`,
+          value
+        };
+      })
+      .concat({
+        name: 'custom',
+        value: 'custom'
+      }) as InquirerChoices,
+    semver.inc(
+      currVersion,
+      preReleaseIdentifier ? 'prepatch' : 'patch',
+      preReleaseIdentifier
+    ) || void 0
+  );
 
   if (nextVersion === 'custom') {
-    nextVersion = (
-      await inquirer.prompt<{ version: string }>({
-        type: 'input',
-        name: 'version',
-        message: `Enter the custom version for ${packageName}`,
-        default: semver.inc(currVersion, 'patch', preReleaseIdentifier)
-      })
-    ).version;
+    nextVersion = await inputInquirer(
+      `Enter the custom version for ${packageName}`,
+      semver.inc(currVersion, 'patch', preReleaseIdentifier) || void 0
+    );
 
     if (!nextVersion) {
       log.error(`No version input`);
@@ -384,20 +376,15 @@ const releasePackageForMonrepo = async (
   push: boolean
 ) => {
   if (!force) {
-    const inquirer = await getInquirer();
-    const yes = (
-      await inquirer.prompt({
-        type: 'confirm',
-        name: 'value',
-        message: [
-          'Confirm:',
-          ...Object.entries(versions).map(
-            ([name, ver]) => `${name}: ${ver.old} => ${ver.new}`
-          ),
-          ''
-        ].join('\n')
-      })
-    ).value;
+    const yes = await confirmInquirer(
+      [
+        'Confirm:',
+        ...Object.entries(versions).map(
+          ([name, ver]) => `${name}: ${ver.old} => ${ver.new}`
+        ),
+        ''
+      ].join('\n')
+    );
     if (!yes) return;
 
     log.empty();
@@ -454,19 +441,17 @@ const releasePackageForMulti = async (
       versions[key] = data[key];
     }
   } else {
-    const inquirer = await getInquirer();
-    const { selecteds } = await inquirer.prompt<{ selecteds: string[] }>({
-      type: 'checkbox',
-      name: 'selecteds',
-      message: 'Select the package to release',
-      choices: Object.entries(data).map(([name, ver]) => ({
+    const selecteds = await checkboxInquirer(
+      'Select the package to release',
+      Object.entries(data).map(([name, ver]) => ({
         name: `${name}: ${ver.old} => ${ver.new}`,
         value: name
-      })),
-      default: Object.keys(data)
-    });
-
-    if (selecteds.length < 1) return;
+      }))
+    );
+    if (selecteds.length < 1) {
+      log.warn('No packages to release');
+      return false;
+    }
 
     for (const key of selecteds) {
       versions[key] = data[key];
@@ -700,7 +685,8 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
     const cwd = process.cwd();
     logger.info('Start', {
       cwd,
-      input: path.relative(cwd, inputRoot)
+      input: path.relative(cwd, inputRoot),
+      options
     });
     logger.empty();
 

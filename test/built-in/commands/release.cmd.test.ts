@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 /**
  * @fileoverview 内置命令 `release` 契约测试
- * @description 对齐 `release.cmd.ts`：multi 与 monorepo 可同次执行；`check` 策略分支不同。
+ * @description 对齐 `release.cmd.ts`：inquirer 封装；multi 与 monorepo 可同次执行。
  */
 
 import type { Stats } from 'node:fs';
@@ -14,13 +14,10 @@ import { ReleaseCommand } from '../../../src/built-in/commands/release.cmd';
 import type { PackageJson } from '../../../src/utils';
 import * as utils from '../../../src/utils';
 
-const mockPrompt = vi.fn();
-
 vi.mock('../../../src/utils', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/utils')>();
   return {
     ...actual,
-    getInquirer: vi.fn(async () => ({ prompt: mockPrompt })),
     getGroupPackages: vi.fn(),
     getUnCommittedFiles: vi.fn(),
     readJsonSync: vi.fn(),
@@ -31,7 +28,11 @@ vi.mock('../../../src/utils', async importOriginal => {
     addGit: vi.fn(),
     commitGit: vi.fn(),
     pushGit: vi.fn(),
-    resetGit: vi.fn()
+    resetGit: vi.fn(),
+    checkboxInquirer: vi.fn(),
+    selectInquirer: vi.fn(),
+    confirmInquirer: vi.fn(),
+    inputInquirer: vi.fn()
   };
 });
 
@@ -59,8 +60,6 @@ describe('ReleaseCommand', () => {
 
   beforeEach(() => {
     release = new ReleaseCommand(new Command('release'), []);
-    mockPrompt.mockReset();
-    mockPrompt.mockResolvedValue({ selecteds: ['pkg-one'] });
     vi.mocked(utils.getGroupPackages).mockReturnValue([
       multiPkg({
         dir: path.join(process.cwd(), 'packages/one'),
@@ -83,6 +82,10 @@ describe('ReleaseCommand', () => {
     vi.mocked(utils.commitGit).mockImplementation(() => {});
     vi.mocked(utils.pushGit).mockImplementation(() => {});
     vi.mocked(utils.resetGit).mockImplementation(() => {});
+    vi.mocked(utils.checkboxInquirer).mockResolvedValue(['pkg-one']);
+    vi.mocked(utils.selectInquirer).mockResolvedValue('patch');
+    vi.mocked(utils.confirmInquirer).mockResolvedValue(true);
+    vi.mocked(utils.inputInquirer).mockResolvedValue('');
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -141,10 +144,11 @@ describe('ReleaseCommand', () => {
       });
 
       expect(utils.writeJsonSync).not.toHaveBeenCalled();
+      expect(utils.checkboxInquirer).not.toHaveBeenCalled();
     });
 
     it('用户未勾选任何包时不应写 manifest', async () => {
-      mockPrompt.mockResolvedValue({ selecteds: [] });
+      vi.mocked(utils.checkboxInquirer).mockResolvedValue([]);
 
       await release.execute({
         name: 'release',
@@ -173,12 +177,12 @@ describe('ReleaseCommand', () => {
       });
 
       expect(utils.writeJsonSync).not.toHaveBeenCalled();
-      expect(mockPrompt).not.toHaveBeenCalled();
+      expect(utils.checkboxInquirer).not.toHaveBeenCalled();
     });
 
     it('multi + check + 用户 abort 时不应写 manifest', async () => {
       vi.mocked(utils.getUnCommittedFiles).mockReturnValue(['M  x.ts']);
-      mockPrompt.mockResolvedValueOnce({ select: 'abort' });
+      vi.mocked(utils.selectInquirer).mockResolvedValue('abort');
 
       await release.execute({
         name: 'release',
@@ -187,7 +191,22 @@ describe('ReleaseCommand', () => {
         startTime: Date.now()
       });
 
+      expect(utils.selectInquirer).toHaveBeenCalled();
       expect(utils.writeJsonSync).not.toHaveBeenCalled();
+    });
+
+    it('multi + check + 全部干净时不弹出未提交提示', async () => {
+      vi.mocked(utils.getUnCommittedFiles).mockReturnValue([]);
+
+      await release.execute({
+        name: 'release',
+        args: ['.'],
+        options: { ...defaultOptions, check: true, force: true, type: 'patch' },
+        startTime: Date.now()
+      });
+
+      expect(utils.selectInquirer).not.toHaveBeenCalled();
+      expect(utils.writeJsonSync).toHaveBeenCalled();
     });
   });
 
@@ -200,6 +219,10 @@ describe('ReleaseCommand', () => {
         startTime: Date.now()
       });
 
+      expect(utils.checkboxInquirer).toHaveBeenCalledWith(
+        'Select the packages to release',
+        ['pkg-one']
+      );
       expect(utils.writeJsonSync).toHaveBeenCalled();
       const written = vi.mocked(utils.writeJsonSync).mock
         .calls[0][1] as PackageJson;
@@ -207,9 +230,7 @@ describe('ReleaseCommand', () => {
     });
 
     it('多包时应联动依赖版本并保留 workspace:', async () => {
-      mockPrompt.mockResolvedValue({
-        selecteds: ['pkg-a', 'pkg-b']
-      });
+      vi.mocked(utils.checkboxInquirer).mockResolvedValue(['pkg-a', 'pkg-b']);
       vi.mocked(utils.getGroupPackages).mockReturnValue([
         multiPkg({
           dir: '/repo/packages/a',
@@ -313,9 +334,9 @@ describe('ReleaseCommand', () => {
           ]
         }
       ]);
-      mockPrompt
-        .mockResolvedValueOnce({ selecteds: ['pkg-multi'] })
-        .mockResolvedValueOnce({ selecteds: ['pkg-mono-child'] });
+      vi.mocked(utils.checkboxInquirer)
+        .mockResolvedValueOnce(['pkg-multi'])
+        .mockResolvedValueOnce(['pkg-mono-child']);
       vi.mocked(utils.readJsonSync).mockImplementation((p: unknown) => {
         const v = String(p).replace(/\\/g, '/');
         if (v.includes('pkg-multi')) {

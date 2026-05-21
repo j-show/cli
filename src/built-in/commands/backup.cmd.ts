@@ -276,7 +276,11 @@ export class BackupCommand extends BaseCommand<BackupOptions> {
     logger.info('Start', {
       cwd,
       input: path.relative(cwd, inputRoot),
-      output: path.relative(cwd, outputRoot)
+      output: path.relative(cwd, outputRoot),
+      options: {
+        clean,
+        filter
+      }
     });
     logger.empty();
 

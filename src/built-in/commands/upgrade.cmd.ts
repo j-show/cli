@@ -1039,7 +1039,11 @@ export class UpgradeCommand extends BaseCommand<UpgradeOptions> {
     const cwd = process.cwd();
     logger.info('Start', {
       cwd,
-      input: path.relative(cwd, inputRoot)
+      input: path.relative(cwd, inputRoot),
+      options: {
+        ignore,
+        ...options
+      }
     });
     logger.empty();
 
