@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BackupCommand } from '../src/built-in/commands/backup.cmd';
+import { PublishCommand } from '../src/built-in/commands/publish.cmd';
 import { ReleaseCommand } from '../src/built-in/commands/release.cmd';
 import { UpgradeCommand } from '../src/built-in/commands/upgrade.cmd';
 import { BaseCommand, type CommandArgs, isCommand } from '../src/command';
@@ -159,15 +160,16 @@ describe('initBuiltIn', () => {
     CommandProgram.reset();
   });
 
-  it('应注册 backup、release、upgrade 内置命令', async () => {
+  it('应注册 backup、publish、release、upgrade 内置命令', async () => {
     initBuiltIn(CommandProgram);
     await CommandProgram.run();
 
     const names = CommandProgram.program.commands.map(c => c.name());
     expect(names).toEqual(
-      expect.arrayContaining(['backup', 'release', 'upgrade'])
+      expect.arrayContaining(['backup', 'publish', 'release', 'upgrade'])
     );
     expect(isCommand(BackupCommand)).toBe(true);
+    expect(isCommand(PublishCommand)).toBe(true);
     expect(isCommand(ReleaseCommand)).toBe(true);
     expect(isCommand(UpgradeCommand)).toBe(true);
   });

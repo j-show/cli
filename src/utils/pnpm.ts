@@ -101,3 +101,26 @@ export const readPnpmCatalogs = (
 
   return result;
 };
+
+/**
+ * 自 `startDir` 向上查找含 `pnpm-workspace.yaml` 的 monorepo 根目录。
+ * @param startDir - 起始目录
+ * @param max - 最大递归深度
+ * @param level - 当前递归深度
+ * @returns monorepo 根绝对路径；未找到时为 `null`
+ */
+export const findPnpmWorkspaceRoot = (
+  startDir: string,
+  max: number = 3,
+  level: number = 0
+): string | null => {
+  if (max < 0 || level >= max) return null;
+
+  const fn = path.join(startDir, PNPM_WORKSPACE_FILE);
+  if (existsSync(fn)) return startDir;
+
+  const parent = path.dirname(startDir);
+  if (parent === startDir) return null;
+
+  return findPnpmWorkspaceRoot(parent, max, level + 1);
+};

@@ -6,6 +6,7 @@
 import { type CommandClassType } from '../../command';
 
 import { BackupCommand } from './backup.cmd';
+import { PublishCommand } from './publish.cmd';
 import { ReleaseCommand } from './release.cmd';
 import { UpgradeCommand } from './upgrade.cmd';
 
@@ -15,6 +16,7 @@ import { UpgradeCommand } from './upgrade.cmd';
  */
 export const BUILT_IN_COMMANDS: CommandClassType[] = [
   BackupCommand,
+  PublishCommand,
   ReleaseCommand,
   UpgradeCommand
 ];

@@ -219,7 +219,8 @@ See [`examples/README.md`](./examples/README.md) for detailed usage instructions
 
 Registered automatically by `initBuiltIn(CommandProgram)` before `CommandProgram.run()`:
 
-- **`release`**: interactive flow to pick public packages, bump versions (`semver`), run `pnpm install`, `git add` / `git commit -F`, and optional `git push` (multi-repo and monorepo can run in one invocation). See [`docs/release.md`](./docs/release.md).
+- **`release`**: interactive flow to pick public packages, bump versions (`semver`), run `pnpm install`, `git add` / `git commit -F`, and optional `git push` (multi-repo and monorepo can run in one invocation). End-of-run **Report** table includes `status` and `count` (selected packages). See [`docs/release.md`](./docs/release.md).
+- **`publish`**: validates a single package, strips `devDependencies`, resolves `workspace:` / `catalog:` versions for publish, and runs `npm publish` (CI-oriented; leaves the formatted `package.json` on disk). See [`docs/publish.md`](./docs/publish.md).
 - **`backup`**: resolves packages via `getGroupPackages` (falls back to `.git` repo scan), optionally `git pull` per package, then copies each package’s top-level entries to an output folder (skips `node_modules`; `-c` excludes `.git`). See [`docs/backup.md`](./docs/backup.md).
 - **`upgrade`**: scans workspace dependencies, lets you multi-select dependencies to query, fetches registry versions, interactively confirms per-field bumps, writes `package.json`, runs `pnpm install`, and optional Git commit/push (multi-repo vs monorepo cannot be mixed). `--force` skips commit/push prompts. See [`docs/upgrade.md`](./docs/upgrade.md) (`--local` not wired yet).
 
@@ -236,7 +237,7 @@ Imported from `@jshow/cli`, shared with built-in `release` / `backup`:
 | Workspace | `getGroupPackages`, `getWorkspacePackages`, `separateGroupPackages` | Scan monorepo / multi-package roots |
 | FS / process | `existsSync`, `readJsonSync`, `writeJsonSync`, `execSync`, `cpSync`, … | Safe I/O and sync subprocess |
 | Git | `getCurrentBranch`, `pullCurrentBranch`, `getUnCommittedFiles`, `diffGit`, `addGit`, `commitGit`, `pushGit`, … | Release/upgrade/backup Git helpers |
-| pnpm | `installPnpm`, `readPnpmCatalogs`, `PNPM_BUILT_IN_WORKSPACE`, `PNPM_BUILT_IN_CATALOG` | Install deps, catalog read, built-in prefixes |
+| pnpm | `installPnpm`, `readPnpmCatalogs`, `findPnpmWorkspaceRoot`, `PNPM_BUILT_IN_WORKSPACE`, `PNPM_BUILT_IN_CATALOG` | Install deps, catalog read, workspace root lookup, built-in prefixes |
 | Prompts | `confirmInquirer`, `inputInquirer`, `checkboxInquirer`, … | Dynamic inquirer wrappers for CLI |
 | Terminal | `red`, `green`, `yellow` | ANSI color helpers |
 | Regexp | `toRegExp`, `toPatterns` | Comma-separated filters (e.g. `backup -f`, `upgrade -i`) |
@@ -280,7 +281,7 @@ Mounts all commands, enhances help text, then `await program.parseAsync(process.
 
 ### `initBuiltIn`
 
-`initBuiltIn(CommandProgram)` installs default plugins and registers built-in commands (`release`, `backup`, `upgrade`), returning `CommandProgram` for chaining.
+`initBuiltIn(CommandProgram)` installs default plugins and registers built-in commands (`release`, `publish`, `backup`, `upgrade`), returning `CommandProgram` for chaining.
 
 ### CommandArgs
 
@@ -474,7 +475,7 @@ The CLI automatically scans the current working directory and its subdirectories
 │   ├── built-in/       # Default commands/plugins wired by initBuiltIn
 │   └── utils/          # Workspace scan, git, pnpm, fs helpers
 ├── test/               # Vitest specs and fixtures (not published)
-├── docs/               # Built-in command docs (backup / release / upgrade)
+├── docs/               # Built-in command docs (backup / publish / release / upgrade)
 ├── examples/           # Sample .cmd / .plugin files
 ├── scripts/            # Dev helpers (e.g. run-cli-help.mjs)
 ├── dist/               # Vite build output (gitignored)

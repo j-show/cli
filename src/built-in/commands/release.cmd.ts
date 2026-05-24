@@ -503,15 +503,21 @@ const releaseMultiPackages = async (
   packages: PackageInfo[],
   { check, type, force, push }: ReleaseOptions
 ) => {
+  const result = {
+    status: false,
+    count: packages.length
+  };
+
   if (check) {
-    const status = await checkPackageUncommittedForMulti(log, packages);
-    if (!status) return false;
+    result.status = await checkPackageUncommittedForMulti(log, packages);
+    if (!result.status) return result;
   }
 
   const selected = await filterReleasePackages(packages);
+  result.count = selected.length;
   if (selected.length === 0) {
     log.warn('No packages to release');
-    return false;
+    return result;
   }
 
   log.empty();
@@ -526,11 +532,13 @@ const releaseMultiPackages = async (
     selected,
     convertReleaseType(type)
   );
-  if (!versions) return false;
+  if (!versions) return result;
 
   await releasePackageForMulti(log, versions, !!force, !!push);
 
-  return true;
+  result.status = true;
+
+  return result;
 };
 
 /**
@@ -543,18 +551,25 @@ const releaseMultiPackages = async (
  */
 const releaseMonrepoPackage = async (
   log: Logger,
-  { dir, children }: PackageGroup,
+  { name, dir, children }: PackageGroup,
   { check, type, force, push }: ReleaseOptions
 ) => {
+  const result = {
+    status: false,
+    name,
+    count: children.length
+  };
+
   if (check) {
-    const status = await checkPackageUncommittedForMonorepo(log, dir);
-    if (!status) return false;
+    result.status = await checkPackageUncommittedForMonorepo(log, dir);
+    if (!result.status) return result;
   }
 
   const selected = await filterReleasePackages(children);
+  result.count = selected.length;
   if (selected.length === 0) {
     log.warn('No packages to release');
-    return false;
+    return result;
   }
 
   log.empty();
@@ -569,11 +584,13 @@ const releaseMonrepoPackage = async (
     selected,
     convertReleaseType(type)
   );
-  if (!versions) return false;
+  if (!versions) return result;
 
   await releasePackageForMonrepo(log, dir, versions, !!force, !!push);
 
-  return true;
+  result.status = true;
+
+  return result;
 };
 
 /**
@@ -700,13 +717,12 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
 
       await logger.scope({ namespace: 'multi' }, async log => {
         // 多独立仓与 monorepo 可同次执行：前者按包各自 Git 根，后者在 monorepo 根统一提交
-        const status = await releaseMultiPackages(log, multiPackages, options);
+        const result = await releaseMultiPackages(log, multiPackages, options);
 
         reports.push({
           type: 'multi',
           name: '-',
-          count: multiPackages.length,
-          status
+          ...result
         });
       });
 
@@ -720,13 +736,11 @@ export class ReleaseCommand extends BaseCommand<ReleaseOptions> {
 
       for (const pkg of monorepoPackages) {
         await logger.scope({ namespace: `mrepo: ${pkg.name}` }, async log => {
-          const status = await releaseMonrepoPackage(log, pkg, options);
+          const result = await releaseMonrepoPackage(log, pkg, options);
 
           reports.push({
             type: 'mono',
-            name: pkg.name,
-            count: pkg.children.length,
-            status
+            ...result
           });
         });
         logger.empty();

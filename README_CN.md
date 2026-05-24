@@ -219,7 +219,8 @@ await initBuiltIn(CommandProgram).run();
 
 由 `initBuiltIn(CommandProgram)` 在 `CommandProgram.run()` 之前默认注册：
 
-- **`release`**：交互选择待发布的非 private 包、`semver` bump、`pnpm install`、`git add` / `git commit -F`、可选 `git push`（多独立仓与 monorepo 可同次执行）。详见 [`docs/release.md`](./docs/release.md)。
+- **`release`**：交互选择待发布的非 private 包、`semver` bump、`pnpm install`、`git add` / `git commit -F`、可选 `git push`（多独立仓与 monorepo 可同次执行）；结束时 **Report** 表含 `status` 与 `count`（实际选中包数）。详见 [`docs/release.md`](./docs/release.md)。
+- **`publish`**：校验并发布**单个** npm 包：移除 `devDependencies`、解析 `workspace:` / `catalog:` 后执行 `npm publish`（面向 CI，保留改写后的 `package.json`）。详见 [`docs/publish.md`](./docs/publish.md)。
 - **`backup`**：用 `getGroupPackages` 解析包（无 manifest 时回退扫描 `.git` 仓），可选 `git pull`，再将包目录一级内容复制到输出目录（默认跳过 `node_modules`，`-c` 可排除 `.git`）。详见 [`docs/backup.md`](./docs/backup.md)。
 - **`upgrade`**：扫描工作区依赖、多选待查询的依赖名后拉取 registry 版本，按 manifest 字段交互确认 bump，写回 `package.json` 并 `pnpm install`，可选 Git 提交与推送（多独立包与 monorepo 不可混扫）。`--force` 跳过提交/推送确认。详见 [`docs/upgrade.md`](./docs/upgrade.md)（`--local` 待接）。
 
@@ -236,7 +237,7 @@ await initBuiltIn(CommandProgram).run();
 | 工作区 | `getGroupPackages`, `getWorkspacePackages`, `separateGroupPackages` | 扫描 monorepo / 多包目录 |
 | 文件系统 | `existsSync`, `readJsonSync`, `writeJsonSync`, `execSync`, `cpSync`, … | 安全读写与同步子进程 |
 | Git | `getCurrentBranch`, `pullCurrentBranch`, `getUnCommittedFiles`, `diffGit`, `addGit`, `commitGit`, `pushGit`, … | 发版/升级/备份常用 Git 封装 |
-| pnpm | `installPnpm`, `readPnpmCatalogs`, `PNPM_BUILT_IN_WORKSPACE`, `PNPM_BUILT_IN_CATALOG` | 安装依赖、catalog 读取、内置前缀常量 |
+| pnpm | `installPnpm`, `readPnpmCatalogs`, `findPnpmWorkspaceRoot`, `PNPM_BUILT_IN_WORKSPACE`, `PNPM_BUILT_IN_CATALOG` | 安装依赖、catalog 读取、向上查找 workspace 根、内置前缀常量 |
 | 交互 | `confirmInquirer`, `inputInquirer`, `checkboxInquirer`, … | 动态加载 inquirer 的 CLI 提示封装 |
 | 终端 | `red`, `green`, `yellow` | ANSI 颜色辅助 |
 | 正则 | `toRegExp`, `toPatterns` | 逗号分隔过滤模式（如 `backup -f`、`upgrade -i`） |
@@ -280,7 +281,7 @@ await initBuiltIn(CommandProgram).run();
 
 ### `initBuiltIn`
 
-`initBuiltIn(CommandProgram)` 安装默认插件并注册内置命令（`release`、`backup`、`upgrade`），返回 `CommandProgram` 以支持链式调用。
+`initBuiltIn(CommandProgram)` 安装默认插件并注册内置命令（`release`、`publish`、`backup`、`upgrade`），返回 `CommandProgram` 以支持链式调用。
 
 
 ### CommandArgs
@@ -475,7 +476,7 @@ CLI 会自动扫描当前工作目录及其子目录，查找所有 `.cmd.ts`、
 │   ├── built-in/       # initBuiltIn 注册的默认命令/插件
 │   └── utils/          # 工作区扫描、git、pnpm、fs 等
 ├── test/               # Vitest 与 fixtures（不参与包发布）
-├── docs/               # 内置命令说明（backup / release / upgrade）
+├── docs/               # 内置命令说明（backup / publish / release / upgrade）
 ├── examples/           # 示例 .cmd / .plugin
 ├── scripts/            # 开发辅助脚本（如 run-cli-help.mjs）
 ├── dist/               # Vite 构建输出（通常 gitignore）
