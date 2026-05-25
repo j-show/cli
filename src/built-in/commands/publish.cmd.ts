@@ -163,22 +163,32 @@ const isScopedPackageName = (name: string): boolean => name.startsWith('@');
 const publishPackage = (
   targetDir: string,
   json: PackageJson,
-  ctx: PublishVersionContext
+  ctx: PublishVersionContext,
+  options: PublishOptions
 ): void => {
   const pkgFile = path.join(targetDir, PACKAGE_JSON_FILE);
   const formatted = formatPackageJsonForPublish(json, ctx);
 
   writeJsonSync(pkgFile, formatted);
 
-  const command = isScopedPackageName(json.name)
-    ? 'npm publish --access public'
-    : 'npm publish';
+  const cmds: string[] = ['npm publish'];
 
-  execSync(`${command} --no-git-checks`, { cwd: targetDir });
+  if (isScopedPackageName(json.name)) {
+    cmds.push('--access public');
+  }
+
+  if (options.provenance) {
+    cmds.push('--provenance');
+  }
+
+  execSync(cmds.join(' '), { cwd: targetDir });
 };
 
 /** `publish` 命令 CLI 选项（当前无额外选项）。 */
-export interface PublishOptions extends CommandOptionsType {}
+export interface PublishOptions extends CommandOptionsType {
+  /** 是否在发布时添加 provenance 信息 */
+  provenance?: boolean;
+}
 
 /**
  * 将单个工作区包发布到 npm registry。
@@ -202,6 +212,14 @@ export class PublishCommand extends BaseCommand<PublishOptions> {
           name: 'input',
           description: 'The input directory'
         }
+      ],
+      options: [
+        {
+          name: 'provenance',
+          abbr: 'p',
+          description: 'Add provenance information to the package',
+          defaultValue: false
+        }
       ]
     };
   }
@@ -212,7 +230,8 @@ export class PublishCommand extends BaseCommand<PublishOptions> {
    * @returns Promise<void>；校验失败时 `process.exit(1)`
    */
   public async execute({
-    args
+    args,
+    options
   }: CommandContext<PublishOptions>): Promise<void> {
     let [inputRoot = '.'] = args;
 
@@ -247,7 +266,7 @@ export class PublishCommand extends BaseCommand<PublishOptions> {
     logger.label(`Publishing ${json.name}@${json.version}...`);
 
     try {
-      publishPackage(inputRoot, json, ctx);
+      publishPackage(inputRoot, json, ctx, options);
     } catch (err) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
